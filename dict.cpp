@@ -36,10 +36,10 @@ static u32 FnvHashBufInitVal(const byte *buf, size_t len, u32 hval)
     return hval;
 }
 
-static u32 FnvHashBuf(const byte *buf, size_t len)
+/*static u32 FnvHashBuf(const byte *buf, size_t len)
 {
     return FnvHashBufInitVal(buf, len, FNV1_32_INIT);
-}
+}*/
 
 static unsigned m_w = 77665;    /* must not be zero */
 static unsigned m_z = 22559;    /* must not be zero */
@@ -192,11 +192,6 @@ public:
 
 static HbHeap s_Heap;
 
-u32 hbHashString(const char* str)
-{
-    return FnvHashBuf((byte*)str, strlen(str));
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 //  HbDictItem
 ///////////////////////////////////////////////////////////////////////////////
@@ -299,6 +294,8 @@ HbDictItem::~HbDictItem()
 //  HbDict
 ///////////////////////////////////////////////////////////////////////////////
 HbDict::HbDict()
+	: m_Count(0)
+	, m_HashSalt(FNV1_32_INIT)
 {
     m_NumSlots = sizeof(m_Slots) / sizeof(m_Slots[0]);
 }
@@ -307,7 +304,7 @@ HbDict::~HbDict()
 {
     for(int i = 0; i < m_NumSlots; ++i)
     {
-        HbDictItem* item = m_Slots[i];
+		HbDictItem* item = m_Slots[i].m_Item;
         HbDictItem* next = item ? item->m_Next : NULL;
         for(; item; item = next, next = next->m_Next)
         {
@@ -349,27 +346,18 @@ HbDict::Destroy(HbDict* dict)
 HbDictItem**
 HbDict::FindItem(const char* key)
 {
-    const u32 hash = hbHashString(key);
-    const unsigned idx = hash & 0xFF;
-    HbDictItem** item = &m_Slots[idx];
-
-    for(; *item; item = &(*item)->m_Next)
-    {
-        if(0 == strcmp((*item)->m_Key.m_String, key))
-        {
-            return item;
-        }
-    }
-
-    return item;
+	Slot* slot;
+	return FindItem(key, &slot);
 }
 
 void
 HbDict::Set(HbDictItem* newItem)
 {
-    HbDictItem** item = FindItem(newItem->m_Key.m_String);
+	Slot* slot;
+    HbDictItem** item = FindItem(newItem->m_Key.m_String, &slot);
     if(!*item)
     {
+		++slot->m_Count;
         ++m_Count;
     }
     else
@@ -378,6 +366,23 @@ HbDict::Set(HbDictItem* newItem)
     }
 
     *item = newItem;
+
+	if(slot->m_Count >= 8)
+	{
+		HbDictItem* dict = HbDictItem::CreateDict("");
+
+		dict->m_Value.m_Dict->m_HashSalt = m_HashSalt+1;
+
+		for(HbDictItem* tmpItem = slot->m_Item; NULL != tmpItem;)
+		{
+			HbDictItem* next = tmpItem->m_Next;
+			tmpItem->m_Next = NULL;
+			dict->m_Value.m_Dict->Set(tmpItem);
+			tmpItem = next;
+		}
+		slot->m_Item = dict;
+		slot->m_Count = 1;
+	}
 }
 
 void
@@ -409,11 +414,76 @@ HbDict::SetDict(const char* key)
     return newItem->m_Value.m_Dict;
 }
 
+//private:
+
+u32
+HbDict::HashString(const char* str)
+{
+    return FnvHashBufInitVal((byte*)str, strlen(str), m_HashSalt);
+}
+
+HbDictItem**
+HbDict::FindItem(const char* key, Slot** slot)
+{
+	HbDictItem** item = NULL;
+	HbDict* dict = this;
+	while(dict)
+	{
+		const unsigned idx = dict->HashString(key) & (NUM_SLOTS-1);
+		*slot = &dict->m_Slots[idx];
+		item = &(*slot)->m_Item;
+		if(*item && (*item)->m_ValType == HB_ITEMTYPE_DICT)
+		{
+			dict = (*item)->m_Value.m_Dict;
+		}
+		else
+		{
+			dict = NULL;
+		}
+	}
+
+	for(; *item; item = &(*item)->m_Next)
+	{
+		if(0 == strcmp((*item)->m_Key.m_String, key))
+		{
+			return item;
+		}
+	}
+
+    return item;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbDictTest
+///////////////////////////////////////////////////////////////////////////////
+void
+HbDictTest::Test(const int numKeys)
+{
+    HbDict* dict = HbDict::Create();
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        char key[32];
+        sprintf(key, "foo%d", i);
+
+        dict->Set(key, (s64)i);
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        char key[32];
+        sprintf(key, "foo%d", i);
+
+        HbDictItem** pitem = dict->FindItem(key);
+        assert(i == (*pitem)->m_Value.m_Int);
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  HbIndexItem
 ///////////////////////////////////////////////////////////////////////////////
 HbIndexItem::HbIndexItem()
-    : m_Key(-1)
+    : m_IntKey(0)
     , m_Node(NULL)
 {
 }
@@ -445,7 +515,7 @@ HbIndexNode::Dump(const bool leafOnly, const int curDepth, const int maxDepth) c
             }
             else
             {
-                snprintf(buf, sizeof(buf)-1, "%.*s%d", curDepth, INDENT, m_Items[i].m_Key);
+                snprintf(buf, sizeof(buf)-1, "%.*s%"PRIu64"", curDepth, INDENT, (s64)m_Items[i].m_IntKey);
                 printf("%s%s%p\n", buf, isLeaf?"L":"", this);
             }
         }
@@ -614,10 +684,10 @@ HbIterator::Prev()
     }
 }
 
-int
+s64
 HbIterator::GetKey()
 {
-    return m_Cur->m_Items[m_ItemIndex].m_Key;
+    return m_Cur->m_Items[m_ItemIndex].m_IntKey;
 }
 
 int
@@ -638,7 +708,7 @@ static int LowerBound(const int key, HbIndexItem* first, HbIndexItem* end)
         HbIndexItem* item = cur;
         size_t step = count >> 1;
         item += step;
-        if(item->m_Key < key)
+        if(item->m_IntKey < key)
         {
             cur = ++item;
             count -= step + 1;
@@ -661,7 +731,7 @@ static int UpperBound(const int key, HbIndexItem* first, HbIndexItem* end)
         HbIndexItem* item = cur;
         size_t step = count >> 1;
         item += step;
-        if(!(key < item->m_Key))
+        if(!(key < item->m_IntKey))
         {
             cur = ++item;
             count -= step + 1;
@@ -752,9 +822,9 @@ HbIndex::Insert(const int key, const int value)
                 rightSibling->m_Items[0] = node->m_Items[node->m_NumItems-1];
                 ++rightSibling->m_NumItems;
                 --node->m_NumItems;
-                parent->m_Items[itemIdx].m_Key = node->m_Items[node->m_NumItems-1].m_Key;
+                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems-1].m_IntKey;
 
-                if(key > node->m_Items[node->m_NumItems-1].m_Key)
+                if(key > node->m_Items[node->m_NumItems-1].m_IntKey)
                 {
                     ++itemIdx;
                     assert(itemIdx < parent->m_NumItems);
@@ -772,9 +842,9 @@ HbIndex::Insert(const int key, const int value)
 
                 ++leftSibling->m_NumItems;
                 --node->m_NumItems;
-                parent->m_Items[itemIdx-1].m_Key = leftSibling->m_Items[leftSibling->m_NumItems-1].m_Key;
+                parent->m_Items[itemIdx-1].m_IntKey = leftSibling->m_Items[leftSibling->m_NumItems-1].m_IntKey;
 
-                if(key <= leftSibling->m_Items[leftSibling->m_NumItems-1].m_Key)
+                if(key <= leftSibling->m_Items[leftSibling->m_NumItems-1].m_IntKey)
                 {
                     --itemIdx;
                     assert(itemIdx >= 0);
@@ -822,15 +892,15 @@ HbIndex::Insert(const int key, const int value)
                     parent->m_Items[i] = parent->m_Items[i-1];
                 }
 
-                parent->m_Items[itemIdx].m_Key = node->m_Items[node->m_NumItems-1].m_Key;
-                parent->m_Items[itemIdx+1].m_Key = sibling->m_Items[sibling->m_NumItems-1].m_Key;
+                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems-1].m_IntKey;
+                parent->m_Items[itemIdx+1].m_IntKey = sibling->m_Items[sibling->m_NumItems-1].m_IntKey;
                 parent->m_Items[itemIdx+1].m_Node = sibling;
                 ++parent->m_NumItems;
 
                 sibling->LinkAfter(node);
 
-                //if(key >= sibling->m_Items[0].m_Key)
-                if(key > node->m_Items[node->m_NumItems-1].m_Key)
+                //if(key >= sibling->m_Items[0].m_IntKey)
+                if(key > node->m_Items[node->m_NumItems-1].m_IntKey)
                 {
                     ++itemIdx;
                     assert(itemIdx < parent->m_NumItems);
@@ -848,7 +918,7 @@ HbIndex::Insert(const int key, const int value)
                 --newItemIdx;
                 if(parent)
                 {
-                    parent->m_Items[itemIdx].m_Key = key;
+                    parent->m_Items[itemIdx].m_IntKey = key;
                 }
             }
 
@@ -866,7 +936,7 @@ HbIndex::Insert(const int key, const int value)
         {
             node->m_Items[i] = node->m_Items[i-1];
         }
-        node->m_Items[newItemIdx].m_Key = key;
+        node->m_Items[newItemIdx].m_IntKey = key;
         node->m_Items[newItemIdx].m_Value = value;
         ++node->m_NumItems;
     }
@@ -874,10 +944,10 @@ HbIndex::Insert(const int key, const int value)
     {
         if(parent)
         {
-            parent->m_Items[itemIdx].m_Key = key;
+            parent->m_Items[itemIdx].m_IntKey = key;
         }
 
-        node->m_Items[newItemIdx].m_Key = key;
+        node->m_Items[newItemIdx].m_IntKey = key;
         node->m_Items[newItemIdx].m_Value = value;
         ++node->m_NumItems;
     }
@@ -894,10 +964,10 @@ HbIndex::Insert(const int key, const int value)
     }
     else if(parent)
     {
-        parent->m_Items[itemIdx].m_Key = key;
+        parent->m_Items[itemIdx].m_IntKey = key;
     }
 
-    node->m_Items[newItemIdx].m_Key = key;
+    node->m_Items[newItemIdx].m_IntKey = key;
     node->m_Items[newItemIdx].m_Value = value;
     ++node->m_NumItems;*/
 
@@ -934,7 +1004,7 @@ HbIndex::Delete(const int key)
             else if(rightSibling)
             {
                 node->m_Items[node->m_NumItems] = rightSibling->m_Items[0];
-                parent->m_Items[itemIdx].m_Key = node->m_Items[node->m_NumItems].m_Key;
+                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems].m_IntKey;
                 ++node->m_NumItems;
 
                 for(int i = 0; i < rightSibling->m_NumItems-1; ++i)
@@ -949,7 +1019,7 @@ HbIndex::Delete(const int key)
                 node->m_Items[node->m_NumItems] = node->m_Items[0];
                 node->m_Items[0] = leftSibling->m_Items[leftSibling->m_NumItems-1];
                 ++node->m_NumItems;
-                parent->m_Items[itemIdx-1].m_Key = leftSibling->m_Items[node->m_NumItems-1].m_Key;
+                parent->m_Items[itemIdx-1].m_IntKey = leftSibling->m_Items[node->m_NumItems-1].m_IntKey;
                 --leftSibling->m_NumItems;
             }
 
@@ -962,7 +1032,7 @@ HbIndex::Delete(const int key)
                     node->m_Items[node->m_NumItems++] = sibling->m_Items[i];
                 }
 
-                parent->m_Items[itemIdx].m_Key = parent->m_Items[itemIdx+1].m_Key;
+                parent->m_Items[itemIdx].m_IntKey = parent->m_Items[itemIdx+1].m_IntKey;
 
                 for(int i = itemIdx+1; i < parent->m_NumItems-1; ++i)
                 {
@@ -995,7 +1065,7 @@ HbIndex::Delete(const int key)
 
         if(depth == m_Depth-1)  //Is it a leaf?
         {
-            if(key != node->m_Items[newItemIdx].m_Key)
+            if(key != node->m_Items[newItemIdx].m_IntKey)
             {
                 return false;
             }
@@ -1102,7 +1172,7 @@ HbIndex::Find(const int key, HbIterator* it) const
         {
             int itemIdx = ::LowerBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
 
-            if(itemIdx < node->m_NumItems && key == node->m_Items[itemIdx].m_Key)
+            if(itemIdx < node->m_NumItems && key == node->m_Items[itemIdx].m_IntKey)
             {
                 it->Clear();
                 it->m_Cur = it->m_First = node;
@@ -1151,7 +1221,7 @@ HbIndex::Validate() const
                 for(int j = 0; j < p->m_NumItems; ++j)
                 {
                     const HbIndexNode* child = p->m_Items[j].m_Node;
-                    if(p->m_Items[j].m_Key != child->m_Items[child->m_NumItems-1].m_Key)
+                    if(p->m_Items[j].m_IntKey != child->m_Items[child->m_NumItems-1].m_IntKey)
                     {
                         assert(false);
                         return false;
@@ -1164,7 +1234,7 @@ HbIndex::Validate() const
             {
                 for(int j = 1; j < cur->m_NumItems; ++j)
                 {
-                    if(cur->m_Items[j].m_Key < cur->m_Items[j-1].m_Key)
+                    if(cur->m_Items[j].m_IntKey < cur->m_Items[j-1].m_IntKey)
                     {
                         assert(false);
                         return false;
@@ -1173,7 +1243,7 @@ HbIndex::Validate() const
                 prev = cur;
                 cur = cur->m_Next;
 
-                if(cur != first && cur->m_Items[0].m_Key < prev->m_Items[prev->m_NumItems-1].m_Key)
+                if(cur != first && cur->m_Items[0].m_IntKey < prev->m_Items[prev->m_NumItems-1].m_IntKey)
                 {
                     assert(false);
                     return false;
@@ -1300,11 +1370,7 @@ HbIndexTest::AddSortedKeys(const int numKeys)
 
 int main(int /*argc*/, char** /*argv*/)
 {
-    HbDict* dict = HbDict::Create();
-
-    dict->Set("foo", "bar");
-
-    HbDictItem** pitem = dict->FindItem("foo");&pitem;
+    HbDictTest::Test(1024*1024*256);
 
     HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);

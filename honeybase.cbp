@@ -32,7 +32,8 @@
 			<Add option="-Wall" />
 			<Add option="-fexceptions" />
 		</Compiler>
-		<Unit filename="main.cpp" />
+		<Unit filename="dict.cpp" />
+		<Unit filename="hb.h" />
 		<Extensions>
 			<code_completion />
 			<debugger />

@@ -5,7 +5,11 @@
 #include <stddef.h>
 
 #define __STDC_FORMAT_MACROS
-#include <inttypes.h>
+//#include <inttypes.h>
+
+#if _MSC_VER
+#define snprintf _snprintf
+#endif
 
 typedef uint8_t     u8;
 typedef uint16_t    u16;
@@ -63,13 +67,13 @@ public:
     static HbDictItem* CreateDict(const char* key);
     static void Destroy(HbDictItem* item);
 
-    HbItemType m_KeyType : 3;
-    HbItemType m_ValType : 3;
-
     HbDictItem* m_Next;
 
     HbValue m_Key;
     HbValue m_Value;
+
+    HbItemType m_KeyType : 4;
+    HbItemType m_ValType : 4;
 
 private:
 
@@ -98,15 +102,41 @@ public:
 
 private:
 
-    HbDictItem* m_Slots[256];
+	class Slot
+	{
+	public:
+		Slot()
+			: m_Item(NULL)
+			, m_Count(0)
+		{
+		}
+
+		HbDictItem* m_Item;
+		int m_Count;
+	};
+
+	u32 HashString(const char* str);
+
+    HbDictItem** FindItem(const char* key, Slot** slot);
+
+	static const int NUM_SLOTS = (1<<8);
+
+    Slot m_Slots[NUM_SLOTS];
 
     s64 m_Count;
     int m_NumSlots;
+	u32 m_HashSalt;
 
     HbDict();
     ~HbDict();
     HbDict(const HbDict&);
     HbDict& operator=(const HbDict&);
+};
+
+class HbDictTest
+{
+public:
+    static void Test(const int numKeys);
 };
 
 class HbIndexItem
@@ -115,7 +145,12 @@ class HbIndexItem
 
 public:
 
-    int m_Key;
+    union
+    {
+        s64 m_IntKey;
+        byte* m_KeyBytes;
+    };
+
     union
     {
         int m_Value;
@@ -166,7 +201,7 @@ public:
     void Next();
     void Prev();
 
-    int GetKey();
+    s64 GetKey();
     int GetValue();
 
 private:
