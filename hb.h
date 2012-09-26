@@ -65,12 +65,15 @@ public:
     static HbDictItem* Create(const char* key, const s64 value);
     static HbDictItem* Create(const char* key, const double value);
     static HbDictItem* CreateDict(const char* key);
+    static HbDictItem* Create(const s64 key, const char* value);
+    static HbDictItem* Create(const s64 key, const s64 value);
+    static HbDictItem* Create(const s64 key, const double value);
+    static HbDictItem* CreateDict(const s64 key);
     static void Destroy(HbDictItem* item);
-
-    HbDictItem* m_Next;
 
     HbValue m_Key;
     HbValue m_Value;
+    HbDictItem* m_Next;
 
     HbItemType m_KeyType : 4;
     HbItemType m_ValType : 4;
@@ -85,6 +88,7 @@ private:
 
 class HbDict
 {
+	friend class HbHeap;
     friend class HbDictItem;
 
 public:
@@ -93,12 +97,22 @@ public:
     static void Destroy(HbDict* dict);
 
     HbDictItem** FindItem(const char* key);
+    HbDictItem** FindItem(const s64 key);
 
     void Set(HbDictItem* item);
     void Set(const char* key, const char* value);
     void Set(const char* key, const s64 value);
     void Set(const char* key, const double value);
     HbDict* SetDict(const char* key);
+    void Set(const s64 key, const char* value);
+    void Set(const s64 key, const s64 value);
+    void Set(const s64 key, const double value);
+    HbDict* SetDict(const s64 key);
+
+	void Clear(const char* key);
+	void Clear(const s64 key);
+
+    s64 Count() const;
 
 private:
 
@@ -118,10 +132,11 @@ private:
 	u32 HashString(const char* str);
 
     HbDictItem** FindItem(const char* key, Slot** slot);
+    HbDictItem** FindItem(const s64 key, Slot** slot);
 
-	static const int NUM_SLOTS = (1<<8);
+	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
-    Slot m_Slots[NUM_SLOTS];
+    Slot* m_Slots;
 
     s64 m_Count;
     int m_NumSlots;
@@ -136,7 +151,10 @@ private:
 class HbDictTest
 {
 public:
-    static void Test(const int numKeys);
+    static void TestStringString(const int numKeys);
+    static void TestStringInt(const int numKeys);
+    static void TestIntInt(const int numKeys);
+    static void TestIntString(const int numKeys);
 };
 
 class HbIndexItem
