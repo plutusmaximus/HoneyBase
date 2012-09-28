@@ -5,7 +5,10 @@
 #include <stddef.h>
 
 #define __STDC_FORMAT_MACROS
-//#include <inttypes.h>
+
+#ifdef __GNUC__
+#include <inttypes.h>
+#endif
 
 #if _MSC_VER
 #define snprintf _snprintf
@@ -21,13 +24,10 @@ typedef int32_t     s32;
 typedef int64_t     s64;
 typedef u8          byte;
 
+#ifdef _MSC_VER
 #ifndef PRIu64
-#if defined(_MSC_VER)
 #define PRId64 "I64d"
 #define PRIu64 "I64u"
-#elif defined(__GNUC__)
-#define PRId64 "lld"
-#define PRIu64 "llu"
 #endif
 #endif
 
@@ -47,6 +47,36 @@ class HbDict;
 class HbIterator;
 class HbIndex;
 class HbIndexNode;
+
+class HbString
+{
+public:
+
+    static HbString* Create(const char* str);
+    static HbString* Create(const byte* str, const size_t len);
+    static void Destroy(HbString* hbs);
+
+    size_t Length() const;
+
+    bool operator==(const HbString& that);
+    bool operator!=(const HbString& that);
+
+private:
+
+    HbString();
+    ~HbString(){}
+    HbString(const HbString&);
+    HbString& operator=(const HbString&);
+
+    byte* m_Bytes;
+};
+
+class HbStringTest
+{
+public:
+
+    static void Test();
+};
 
 union HbValue
 {
@@ -178,6 +208,7 @@ public:
 private:
 
     HbIndexItem();
+    ~HbIndexItem(){}
 };
 
 class HbIndexNode

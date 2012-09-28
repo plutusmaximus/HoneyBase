@@ -201,7 +201,7 @@ public:
 
     void FreeDictItem(HbDictItem* item)
     {
-		HbDict::Slot* slots = 
+		HbDict::Slot* slots =
 			(HB_ITEMTYPE_DICT == item->m_ValType) ? item->m_Value.m_Dict->m_Slots : NULL;
 		item->~HbDictItem();
         FreeMem(item);
@@ -222,6 +222,153 @@ public:
 
 static HbHeap s_Heap;
 
+///////////////////////////////////////////////////////////////////////////////
+//  HbString
+///////////////////////////////////////////////////////////////////////////////
+HbString*
+HbString::Create(const char* str)
+{
+    return Create((byte*)str, strlen(str));
+}
+
+HbString*
+HbString::Create(const byte* str, const size_t len)
+{
+    int lenBytes = 0;
+    size_t tmpLen = len;
+
+    while(tmpLen)
+    {
+        tmpLen >>= 7;
+        ++lenBytes;
+    }
+
+    const size_t memLen = sizeof(HbString) + len + lenBytes;
+    HbString* hbs = (HbString*) s_Heap.AllocMem(memLen);
+    if(hbs)
+    {
+        new (hbs) HbString();
+
+        hbs->m_Bytes = (byte*) &hbs[1];
+
+        int offset = 0;
+        tmpLen = len;
+        for(int i = lenBytes-1; i > 0; --i)
+        {
+            hbs->m_Bytes[offset++] = 0x80 | (tmpLen & 0x7F);
+            tmpLen >>= 7;
+        }
+
+        hbs->m_Bytes[offset++] = tmpLen & 0x7F;
+
+        memcpy(&hbs->m_Bytes[offset], str, len);
+    }
+
+    return hbs;
+}
+
+void
+HbString::Destroy(HbString* hbs)
+{
+    hbs->~HbString();
+    s_Heap.FreeMem(hbs);
+}
+
+size_t
+HbString::Length() const
+{
+    if(m_Bytes)
+    {
+        size_t len = 0;
+        const byte* p = m_Bytes;
+        int shift = 0;
+
+        while(*p & 0x80)
+        {
+            len |= (*p++ & 0x7F) << shift;
+            shift += 7;
+        }
+
+        len |= (*p & 0x7F) << shift;
+
+        return len;
+    }
+
+    return 0;
+}
+
+bool
+HbString::operator==(const HbString& that)
+{
+    const size_t mylen = Length();
+    return (that.Length() == mylen
+            && (0 == mylen || 0 == memcmp(m_Bytes, that.m_Bytes, mylen)));
+}
+
+bool
+HbString::operator!=(const HbString& that)
+{
+    const size_t mylen = Length();
+    return (that.Length() != mylen ||
+            (0 != mylen && 0 != memcmp(m_Bytes, that.m_Bytes, mylen)));
+}
+
+//private:
+
+HbString::HbString()
+    : m_Bytes(NULL)
+{
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbStringTest
+///////////////////////////////////////////////////////////////////////////////
+void
+HbStringTest::Test()
+{
+    HbString* hbs = HbString::Create("Foo");
+    assert(hbs->Length() == 3);
+    HbString::Destroy(hbs);
+
+    size_t len;
+    byte* str;
+
+    len = 0x7F + 321;
+    str = new byte[len];
+    for(size_t i = 0; i < len; ++i)
+    {
+        str[i] = (byte)i;
+    }
+
+    hbs = HbString::Create(str, len);
+    assert(hbs->Length() == len);
+    HbString::Destroy(hbs);
+    delete [] str;
+
+    len = 0x7FFF + 321;
+    str = new byte[len];
+    for(size_t i = 0; i < len; ++i)
+    {
+        str[i] = (byte)i;
+    }
+
+    hbs = HbString::Create(str, len);
+    assert(hbs->Length() == len);
+    HbString::Destroy(hbs);
+    delete [] str;
+
+    len = 0x7FFFFF + 321;
+    str = new byte[len];
+    for(size_t i = 0; i < len; ++i)
+    {
+        str[i] = (byte)i;
+    }
+
+    hbs = HbString::Create(str, len);
+    assert(hbs->Length() == len);
+    HbString::Destroy(hbs);
+    delete [] str;
+}
 ///////////////////////////////////////////////////////////////////////////////
 //  HbDictItem
 ///////////////////////////////////////////////////////////////////////////////
@@ -469,7 +616,7 @@ HbDict::Set(HbDictItem* newItem)
 {
 	Slot* slot;
     HbDictItem** item;
-	
+
 	switch(newItem->m_KeyType)
 	{
 	case HB_ITEMTYPE_STRING:
@@ -868,7 +1015,7 @@ HbIndexNode::Dump(const bool leafOnly, const int curDepth, const int maxDepth) c
             }
             else
             {
-                snprintf(buf, sizeof(buf)-1, "%.*s%"PRIu64"", curDepth, INDENT, (s64)m_Items[i].m_IntKey);
+                snprintf(buf, sizeof(buf)-1, "%.*s%"PRId64"", curDepth, INDENT, (s64)m_Items[i].m_IntKey);
                 printf("%s%s%p\n", buf, isLeaf?"L":"", this);
             }
         }
@@ -1717,12 +1864,11 @@ HbIndexTest::AddSortedKeys(const int numKeys)
         ++count;
     }
     assert(count == numKeys);
-
-    int iii = 0;&iii;
 }
 
 int main(int /*argc*/, char** /*argv*/)
 {
+    HbStringTest::Test();
     HbDictTest::TestStringString(1024);
     HbDictTest::TestStringInt(1024);
     HbDictTest::TestIntInt(1024);
