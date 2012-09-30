@@ -234,16 +234,16 @@ HbString::Create(const char* str)
 HbString*
 HbString::Create(const byte* str, const size_t len)
 {
-    int lenBytes = 0;
+    size_t memLen = sizeof(HbString) + len;
+    assert(memLen > len);   //throw
     size_t tmpLen = len;
 
     while(tmpLen)
     {
         tmpLen >>= 7;
-        ++lenBytes;
+        ++memLen;
     }
 
-    const size_t memLen = sizeof(HbString) + len + lenBytes;
     HbString* hbs = (HbString*) s_Heap.AllocMem(memLen);
     if(hbs)
     {
@@ -253,7 +253,7 @@ HbString::Create(const byte* str, const size_t len)
 
         int offset = 0;
         tmpLen = len;
-        for(int i = lenBytes-1; i > 0; --i)
+        while(tmpLen > 0x7F)
         {
             hbs->m_Bytes[offset++] = 0x80 | (tmpLen & 0x7F);
             tmpLen >>= 7;
@@ -1766,6 +1766,7 @@ struct TextKv
 {
     int m_Key;
     int m_Value;
+    bool m_Added : 1;
 
     bool operator<(const TextKv& a) const
     {
@@ -1835,6 +1836,78 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 }
 
 void
+HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
+{
+    HbIndex index;
+    int value;
+
+    int* keys = NULL;
+
+    if(unique)
+    {
+        keys = new int[numKeys];
+        for(int i = 0; i < numKeys; ++i)
+        {
+            keys[i] = i;
+        }
+        std::random_shuffle(&keys[0], &keys[numKeys], myrandom);
+    }
+
+    TextKv* kv = new TextKv[numKeys];
+    int i;
+    for(i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Key = unique ? keys[i] : HbRand() % range;
+        kv[i].m_Value = i;
+        kv[i].m_Added = false;
+    }
+
+    int iii = 0;
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        if(11106 == i)
+        {
+            iii = 1;
+        }
+
+        int idx = HbRand() % numKeys;
+        if(!kv[idx].m_Added)
+        {
+            index.Insert(kv[idx].m_Key, kv[idx].m_Value);
+            kv[idx].m_Added = true;
+            assert(index.Find(kv[idx].m_Key, &value));
+        }
+        else
+        {
+            index.Delete(kv[idx].m_Key);
+            kv[idx].m_Added = false;
+            assert(!index.Find(kv[idx].m_Key, &value));
+        }
+
+        index.Validate();
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        if(kv[i].m_Added)
+        {
+            assert(index.Find(kv[i].m_Key, &value) && (!unique || value == kv[i].m_Value));
+        }
+        else
+        {
+            assert(!index.Find(kv[i].m_Key, &value));
+        }
+    }
+
+    index.DumpStats();
+
+    index.Validate();
+
+    //index.Dump(true);
+}
+
+void
 HbIndexTest::AddSortedKeys(const int numKeys)
 {
     HbIndex index;
@@ -1874,9 +1947,9 @@ int main(int /*argc*/, char** /*argv*/)
     HbDictTest::TestIntInt(1024);
     HbDictTest::TestIntString(1024);
 
+    HbIndexTest::AddDeleteRandomKeys(1024*1024, true, 0);
     HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 
     HbIndexTest::AddSortedKeys(1024*1024);
-
 }

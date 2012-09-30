@@ -300,6 +300,7 @@ class HbIndexTest
 {
 public:
     static void AddRandomKeys(const int numKeys, const bool unique, const int range);
+    static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddSortedKeys(const int numKeys);
 };
 
