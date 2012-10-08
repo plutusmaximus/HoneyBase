@@ -9,6 +9,13 @@
 #include <algorithm>
 #include <assert.h>
 
+#if _MSC_VER
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#elif defined(__GNUC__)
+#include <time.h>
+#endif
+
 #define FNV1_32_INIT ((u32)0x811c9dc5)
 
 static u32 FnvHashBufInitVal(const byte *buf, size_t len, u32 hval)
@@ -369,6 +376,70 @@ HbStringTest::Test()
     HbString::Destroy(hbs);
     delete [] str;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbStopWatch
+///////////////////////////////////////////////////////////////////////////////
+HbStopWatch::HbStopWatch()
+: m_Start(0)
+, m_Stop(0)
+, m_Running(false)
+{
+#if _MSC_VER
+    QueryPerformanceFrequency((LARGE_INTEGER*)&m_Freq);
+#elif defined(__GNUC__)
+    m_Freq = 1000000000;
+#endif
+}
+
+void
+HbStopWatch::Start()
+{
+#if _MSC_VER
+    QueryPerformanceCounter((LARGE_INTEGER*)&m_Start);
+#elif defined(__GNUC__)
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    m_Start = (ts.tv_sec*m_Freq) + ts.tv_nsec;
+#endif
+    m_Running = true;
+}
+
+void
+HbStopWatch::Stop()
+{
+#if _MSC_VER
+    QueryPerformanceCounter((LARGE_INTEGER*)&m_Stop);
+#elif defined(__GNUC__)
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    m_Stop = (ts.tv_sec*m_Freq) + ts.tv_nsec;
+#endif
+    m_Running = false;
+}
+
+double
+HbStopWatch::GetElapsed() const
+{
+    u64 stop;
+    if(m_Running)
+    {
+#if _MSC_VER
+        QueryPerformanceCounter((LARGE_INTEGER*)&stop);
+#elif defined(__GNUC__)
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        stop = (ts.tv_sec*m_Freq) + ts.tv_nsec;
+#endif
+    }
+    else
+    {
+        stop = m_Stop;
+    }
+
+    return ((double)(stop - m_Start)) / m_Freq;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  HbDictItem
 ///////////////////////////////////////////////////////////////////////////////
@@ -980,6 +1051,14 @@ HbDictTest::TestIntString(const int numKeys)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+//  HbIndexKey
+///////////////////////////////////////////////////////////////////////////////
+HbIndexKey::HbIndexKey()
+    : m_IntKey(0)
+{
+}
+
+///////////////////////////////////////////////////////////////////////////////
 //  HbIndexItem
 ///////////////////////////////////////////////////////////////////////////////
 HbIndexItem::HbIndexItem()
@@ -1049,46 +1128,6 @@ HbIndexNode::Unlink()
     m_Prev->m_Next = m_Next;
     m_Next->m_Prev = m_Prev;
     m_Next = m_Prev = this;
-}
-
-void
-HbIndexNode::MoveItemsRight(HbIndexNode* src, HbIndexNode* dst, const int numItems)
-{
-    for(int i = dst->m_NumItems-1; i >= 0; --i)
-    {
-        dst->m_Items[dst->m_NumItems+numItems] = dst->m_Items[i];
-    }
-
-    for(int i = 0; i < numItems; ++i)
-    {
-        dst->m_Items[i] = src->m_Items[src->m_NumItems - (numItems-i)];
-    }
-
-    dst->m_NumItems += numItems;
-    src->m_NumItems -= numItems;
-}
-
-void
-HbIndexNode::MoveItemsLeft(HbIndexNode* src, HbIndexNode* dst, const int numItems)
-{
-    for(int i = 0; i < numItems; ++i)
-    {
-        dst->m_Items[dst->m_NumItems++] = src->m_Items[i];
-    }
-
-    src->m_NumItems -= numItems;
-    for(int i = dst->m_NumItems-1; i >= 0; --i)
-    {
-        dst->m_Items[dst->m_NumItems+numItems] = dst->m_Items[i];
-    }
-
-    for(int i = 0; i < numItems; ++i)
-    {
-        dst->m_Items[i] = src->m_Items[src->m_NumItems - (numItems-i)];
-    }
-
-    dst->m_NumItems += numItems;
-    src->m_NumItems -= numItems;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1452,25 +1491,6 @@ HbIndex::Insert(const int key, const int value)
         ++node->m_NumItems;
     }
 
-    /*//Find the first item with a larger key and insert the new item before it.
-    const int newItemIdx = ::UpperBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
-
-    if(newItemIdx < node->m_NumItems)
-    {
-        for(int i = node->m_NumItems; i > newItemIdx; --i)
-        {
-            node->m_Items[i] = node->m_Items[i-1];
-        }
-    }
-    else if(parent)
-    {
-        parent->m_Items[itemIdx].m_IntKey = key;
-    }
-
-    node->m_Items[newItemIdx].m_IntKey = key;
-    node->m_Items[newItemIdx].m_Value = value;
-    ++node->m_NumItems;*/
-
     ++m_Count;
 
     return true;
@@ -1761,7 +1781,6 @@ HbIndex::Validate() const
 ///////////////////////////////////////////////////////////////////////////////
 //  HbIndexTest
 ///////////////////////////////////////////////////////////////////////////////
-
 struct TextKv
 {
     int m_Key;
@@ -1939,15 +1958,311 @@ HbIndexTest::AddSortedKeys(const int numKeys)
     assert(count == numKeys);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+//  HbIndexNode2
+///////////////////////////////////////////////////////////////////////////////
+HbIndexNode2::HbIndexNode2()
+: m_NumKeys(0)
+{
+    memset(m_Keys, 0, sizeof(m_Keys));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbIndex2
+///////////////////////////////////////////////////////////////////////////////
+HbIndex2::HbIndex2()
+: m_Nodes(NULL)
+, m_Leaves(NULL)
+, m_Count(0)
+, m_Capacity(0)
+, m_Depth(0)
+{
+}
+
+bool
+HbIndex2::Insert(const s64 key, const s64 value)
+{
+    if(!m_Nodes)
+    {
+        m_Leaves = m_Nodes = new HbIndexNode2();
+        if(!m_Nodes)
+        {
+            return false;
+        }
+
+        m_Capacity += ARRAYLEN(m_Nodes->m_Items);
+        ++m_Depth;
+    }
+
+    HbIndexNode2* node = m_Nodes;
+    HbIndexNode2* parent = NULL;
+    int keyIdx = 0;
+
+    for(int depth = 0; depth < m_Depth; ++depth)
+    {
+        const bool isLeaf = (depth == m_Depth-1);
+
+        if(ARRAYLEN(node->m_Keys) == node->m_NumKeys)
+        {
+            const int splitLoc = ARRAYLEN(node->m_Keys) / 2;
+            const int numToCopy = ARRAYLEN(node->m_Keys)-splitLoc;
+            HbIndexNode2* newNode = new HbIndexNode2();
+            m_Capacity += ARRAYLEN(m_Nodes->m_Items);
+            memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
+            if(isLeaf)
+            {
+                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
+                memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
+                newNode->m_NumKeys = numToCopy;
+                node->m_NumKeys -= numToCopy;
+            }
+            else
+            {
+                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
+                memcpy(newNode->m_Items, &node->m_Items[splitLoc+1], numToCopy * sizeof(node->m_Items[0]));
+                newNode->m_NumKeys = numToCopy-1;
+                node->m_NumKeys -= numToCopy;
+            }
+
+            if(!parent)
+            {
+                parent = m_Nodes = new HbIndexNode2();
+                m_Capacity += ARRAYLEN(m_Nodes->m_Items);
+                parent->m_Items[0].m_Node = node;
+                ++m_Depth;
+                ++depth;
+            }
+
+            for(int i = parent->m_NumKeys; i > keyIdx; --i)
+            {
+                parent->m_Keys[i] = parent->m_Keys[i-1];
+                parent->m_Items[i+1] = parent->m_Items[i];
+            }
+
+            parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
+            parent->m_Items[keyIdx+1].m_Node = newNode;
+            ++parent->m_NumKeys;
+
+            if(isLeaf)
+            {
+                newNode->m_Items[ARRAYLEN(newNode->m_Items)-1].m_Node =
+                    node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node;
+                node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node = newNode;
+            }
+
+            /*//DO NOT SUBMIT
+            for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
+            {
+                node->m_Keys[i] = 0;
+            }
+
+            if(!isLeaf)
+            {
+                for(int i = node->m_NumKeys+1; i < ARRAYLEN(node->m_Keys); ++i)
+                {
+                    node->m_Items[i].m_Value = 0;
+                }
+            }
+            else
+            {
+                for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
+                {
+                    node->m_Items[i].m_Value = 0;
+                }
+            }*/
+
+            if(key >= parent->m_Keys[keyIdx])
+            {
+                node = newNode;
+            }
+        }
+
+        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+
+        if(!isLeaf)
+        {
+            parent = node;
+            node = parent->m_Items[keyIdx].m_Node;
+        }
+    }
+
+    for(int i = node->m_NumKeys; i > keyIdx; --i)
+    {
+        node->m_Keys[i] = node->m_Keys[i-1];
+        node->m_Items[i] = node->m_Items[i-1];
+    }
+
+    node->m_Keys[keyIdx] = key;
+    node->m_Items[keyIdx].m_Value = value;
+    ++node->m_NumKeys;
+
+    ++m_Count;
+
+    return true;
+}
+
+bool
+HbIndex2::Find(const s64 key, s64* value) const
+{
+    bool success = false;
+
+    const HbIndexNode2* node = m_Nodes;
+    const HbIndexNode2* parent = NULL;
+    int keyIdx = 0;
+
+    for(int depth = 0; depth < m_Depth-1; ++depth)
+    {
+        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        if(depth < m_Depth-1)
+        {
+            parent = node;
+            node = parent->m_Items[keyIdx].m_Node;
+        }
+    }
+
+    for(keyIdx = 0; keyIdx < node->m_NumKeys; ++keyIdx)
+    {
+        if(key == node->m_Keys[keyIdx])
+        {
+            break;
+        }
+    }
+
+    if(keyIdx <= node->m_NumKeys)
+    {
+        *value = node->m_Items[keyIdx].m_Value;
+        success = true;
+    }
+
+    return success;
+}
+
+void
+HbIndex2::Validate()
+{
+    if(m_Nodes)
+    {
+        ValidateNode(0, m_Nodes);
+    }
+}
+
+void
+HbIndex2::ValidateNode(const int depth, HbIndexNode2* node)
+{
+    for(int i = 1; i < node->m_NumKeys; ++i)
+    {
+        assert(node->m_Keys[i] > node->m_Keys[i-1]);
+    }
+
+    /*for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
+    {
+        assert(0 == node->m_Keys[i]);
+        assert(node->m_Items[i].m_Node != node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node
+                || 0 == node->m_Items[i].m_Node);
+    }*/
+
+    if(depth < m_Depth-1)
+    {
+        for(int i = 0; i < node->m_NumKeys; ++i)
+        {
+            const s64 key = node->m_Keys[i];
+            const HbIndexNode2* child = node->m_Items[i].m_Node;
+            for(int j = 0; j < child->m_NumKeys; ++j)
+            {
+                assert(child->m_Keys[j] < key);
+            }
+        }
+
+        const s64 key = node->m_Keys[node->m_NumKeys-1];
+        const HbIndexNode2* child = node->m_Items[node->m_NumKeys].m_Node;
+        for(int j = 0; j < child->m_NumKeys; ++j)
+        {
+            assert(child->m_Keys[j] >= key);
+        }
+
+        ValidateNode(depth+1, node->m_Items[0].m_Node);
+    }
+}
+
+int
+HbIndex2::UpperBound(const s64 key, const s64* first, const s64* end)
+{
+    const s64* cur = first;
+
+    /*for(; cur < end; ++cur)
+    {
+        if(key < *cur)
+        {
+            break;
+        }
+    }*/
+
+    size_t count = end - first;
+    while(count > 0)
+    {
+        const s64* item = cur;
+        size_t step = count >> 1;
+        item += step;
+        if(!(key < *item))
+        {
+            cur = ++item;
+            count -= step + 1;
+        }
+        else
+        {
+            count = step;
+        }
+    }
+
+    return cur - first;
+}
+
 int main(int /*argc*/, char** /*argv*/)
 {
+    const int numKeys = 1000000;
+    s64* keys = new s64[numKeys];
+    HbIndex2 index2;
+    for(int i = 0; i < numKeys; ++i)
+    {
+        keys[i] = i+1;
+    }
+
+    std::random_shuffle(&keys[0], &keys[numKeys]);
+
+    HbStopWatch sw;
+
+    sw.Start();
+    s64 value;
+    for(int i = 0; i < numKeys; ++i)
+    {
+        index2.Insert(keys[i], keys[i]);
+    }
+
+    index2.Validate();
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        assert(index2.Find(i+1, &value) && value == i+1);
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        assert(index2.Find(keys[i], &value) && value == keys[i]);
+    }
+
+    sw.Stop();
+
+    double elapsed = sw.GetElapsed();
+    ++elapsed;
+    --elapsed;
+
     HbStringTest::Test();
     HbDictTest::TestStringString(1024);
     HbDictTest::TestStringInt(1024);
     HbDictTest::TestIntInt(1024);
     HbDictTest::TestIntString(1024);
 
-    HbIndexTest::AddDeleteRandomKeys(1024*1024, true, 0);
+    //HbIndexTest::AddDeleteRandomKeys(1024*1024, true, 0);
     HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 

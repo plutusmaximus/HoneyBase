@@ -78,6 +78,24 @@ public:
     static void Test();
 };
 
+class HbStopWatch
+{
+public:
+    HbStopWatch();
+
+    void Start();
+    void Stop();
+
+    double GetElapsed() const;
+
+private:
+    u64 m_Freq;
+    u64 m_Start;
+    u64 m_Stop;
+
+    bool m_Running  : 1;
+};
+
 union HbValue
 {
     s64 m_Int;
@@ -187,6 +205,24 @@ public:
     static void TestIntString(const int numKeys);
 };
 
+class HbIndexKey
+{
+    friend class HbIndexNode;
+
+public:
+
+    union
+    {
+        s64 m_IntKey;
+        byte* m_KeyBytes;
+    };
+
+private:
+
+    HbIndexKey();
+    ~HbIndexKey(){}
+};
+
 class HbIndexItem
 {
     friend class HbIndexNode;
@@ -226,9 +262,6 @@ public:
     void LinkBefore(HbIndexNode* node);
     void LinkAfter(HbIndexNode* node);
     void Unlink();
-
-    static void MoveItemsRight(HbIndexNode* src, HbIndexNode* dst, const int numItems);
-    static void MoveItemsLeft(HbIndexNode* src, HbIndexNode* dst, const int numItems);
 
     HbIndexNode* m_Next;
     HbIndexNode* m_Prev;
@@ -302,6 +335,69 @@ public:
     static void AddRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddSortedKeys(const int numKeys);
+};
+
+class HbIndexNode2;
+
+class HbIndexItem2
+{
+public:
+
+    HbIndexItem2()
+        : m_Value(0)
+    {
+    }
+
+    union
+    {
+        s64 m_Value;
+        HbIndexNode2* m_Node;
+    };
+};
+
+class HbIndexNode2
+{
+public:
+
+    static const int NUM_KEYS = 256;
+
+    HbIndexNode2();
+
+    s64 m_Keys[NUM_KEYS];
+    HbIndexItem2 m_Items[NUM_KEYS+1];
+
+    int m_NumKeys;
+};
+
+class HbIndex2
+{
+public:
+
+    HbIndex2();
+
+    bool Insert(const s64 key, const s64 value);
+
+    bool Delete(const s64 key);
+
+    bool Find(const s64 key, s64* value) const;
+
+    unsigned Count(const int key) const;
+
+    void Validate();
+
+private:
+
+    void ValidateNode(const int depth, HbIndexNode2* node);
+
+    static int UpperBound(const s64 key, const s64* first, const s64* end);
+
+    HbIndexNode2* m_Nodes;
+
+    HbIndexNode2* m_Leaves;
+
+    u64 m_Count;
+    u64 m_Capacity;
+    int m_Depth;
 };
 
 #endif  //__HB_H__
