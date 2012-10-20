@@ -387,6 +387,8 @@ public:
 
 private:
 
+    void TrimNode(HbIndexNode2* node, const int depth);
+
     void ValidateNode(const int depth, HbIndexNode2* node);
 
     static int UpperBound(const s64 key, const s64* first, const s64* end);

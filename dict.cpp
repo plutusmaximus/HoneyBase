@@ -2002,6 +2002,132 @@ HbIndex2::Insert(const s64 key, const s64 value)
     {
         const bool isLeaf = (depth == m_Depth-1);
 
+#define AUTO_DEFRAG 1
+#if AUTO_DEFRAG
+        if(ARRAYLEN(node->m_Keys) == node->m_NumKeys)
+        {
+            HbIndexNode2* sibling = NULL;
+            if(parent)
+            {
+                if(keyIdx > 0)
+                {
+                    //Left sibling
+                    sibling = parent->m_Items[keyIdx-1].m_Node;
+                    if(sibling->m_NumKeys < (int)ARRAYLEN(sibling->m_Keys)-1)
+                    {
+                        if(isLeaf)
+                        {
+                            sibling->m_Keys[sibling->m_NumKeys] = node->m_Keys[0];
+                            sibling->m_Items[sibling->m_NumKeys] = node->m_Items[0];
+
+                            memmove(&node->m_Items[0], &node->m_Items[1], (node->m_NumKeys-1) * sizeof(node->m_Items[0]));
+                            /*for(int i = 0; i < node->m_NumKeys-1; ++i)
+                            {
+                                node->m_Items[i] = node->m_Items[i+1];
+                            }*/
+
+                            parent->m_Keys[keyIdx-1] = node->m_Keys[1];
+                        }
+                        else
+                        {
+                            sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
+                            sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
+
+                            memmove(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys * sizeof(node->m_Items[0]));
+                            /*for(int i = 0; i < node->m_NumKeys; ++i)
+                            {
+                                node->m_Items[i] = node->m_Items[i+1];
+                            }*/
+
+                            parent->m_Keys[keyIdx-1] = node->m_Keys[0];
+                        }
+
+                        memmove(&node->m_Keys[0], &node->m_Keys[1], (node->m_NumKeys-1) * sizeof(node->m_Keys[0]));
+                        /*for(int i = 0; i < node->m_NumKeys-1; ++i)
+                        {
+                            node->m_Keys[i] = node->m_Keys[i+1];
+                        }*/
+
+                        ++sibling->m_NumKeys;
+                        --node->m_NumKeys;
+
+                        //DO NOT SUBMIT
+                        //TrimNode(sibling, depth);
+                        //TrimNode(node, depth);
+                        //ValidateNode(depth-1, parent);
+
+                        if(key < parent->m_Keys[keyIdx-1])
+                        {
+                            --keyIdx;
+                            node = sibling;
+                        }
+                    }
+                    else
+                    {
+                        sibling = NULL;
+                    }
+                }
+
+                if(!sibling && keyIdx < parent->m_NumKeys)
+                {
+                    //right sibling
+                    sibling = parent->m_Items[keyIdx+1].m_Node;
+                    if(sibling->m_NumKeys < (int)ARRAYLEN(sibling->m_Keys)-1)
+                    {
+                        memmove(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys * sizeof(sibling->m_Keys[0]));
+                        /*for(int i = sibling->m_NumKeys; i > 0; --i)
+                        {
+                            sibling->m_Keys[i] = sibling->m_Keys[i-1];
+                        }*/
+
+                        if(isLeaf)
+                        {
+                            memmove(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys * sizeof(sibling->m_Items[0]));
+                            /*for(int i = sibling->m_NumKeys; i > 0; --i)
+                            {
+                                sibling->m_Items[i] = sibling->m_Items[i-1];
+                            }*/
+
+                            sibling->m_Keys[0] = node->m_Keys[node->m_NumKeys-1];
+                            sibling->m_Items[0] = node->m_Items[node->m_NumKeys-1];
+                            parent->m_Keys[keyIdx] = sibling->m_Keys[0];
+                        }
+                        else
+                        {
+                            memmove(&sibling->m_Items[1], &sibling->m_Items[0], (sibling->m_NumKeys+1) * sizeof(sibling->m_Items[0]));
+                            /*for(int i = sibling->m_NumKeys+1; i > 0; --i)
+                            {
+                                sibling->m_Items[i] = sibling->m_Items[i-1];
+                            }*/
+
+                            sibling->m_Keys[0] = parent->m_Keys[keyIdx];
+                            sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
+                            parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
+                        }
+
+                        ++sibling->m_NumKeys;
+                        --node->m_NumKeys;
+
+                        //DO NOT SUBMIT
+                        //TrimNode(sibling, depth);
+                        //TrimNode(node, depth);
+                        //ValidateNode(depth-1, parent);
+
+                        if(key >= parent->m_Keys[keyIdx])
+                        {
+                            ++keyIdx;
+                            node = sibling;
+                        }
+                    }
+                    else
+                    {
+                        sibling = NULL;
+                    }
+                }
+            }
+        }
+#endif  //AUTO_DEFRAG
+
         if(ARRAYLEN(node->m_Keys) == node->m_NumKeys)
         {
             const int splitLoc = ARRAYLEN(node->m_Keys) / 2;
@@ -2033,11 +2159,13 @@ HbIndex2::Insert(const s64 key, const s64 value)
                 ++depth;
             }
 
-            for(int i = parent->m_NumKeys; i > keyIdx; --i)
+            memmove(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], (parent->m_NumKeys-keyIdx) * sizeof(parent->m_Keys[0]));
+            memmove(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], (parent->m_NumKeys-keyIdx) * sizeof(parent->m_Items[0]));
+            /*for(int i = parent->m_NumKeys; i > keyIdx; --i)
             {
                 parent->m_Keys[i] = parent->m_Keys[i-1];
                 parent->m_Items[i+1] = parent->m_Items[i];
-            }
+            }*/
 
             parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
             parent->m_Items[keyIdx+1].m_Node = newNode;
@@ -2050,26 +2178,8 @@ HbIndex2::Insert(const s64 key, const s64 value)
                 node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node = newNode;
             }
 
-            /*//DO NOT SUBMIT
-            for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
-            {
-                node->m_Keys[i] = 0;
-            }
-
-            if(!isLeaf)
-            {
-                for(int i = node->m_NumKeys+1; i < ARRAYLEN(node->m_Keys); ++i)
-                {
-                    node->m_Items[i].m_Value = 0;
-                }
-            }
-            else
-            {
-                for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
-                {
-                    node->m_Items[i].m_Value = 0;
-                }
-            }*/
+            //DO NOT SUBMIT
+            //TrimNode(node, depth);
 
             if(key >= parent->m_Keys[keyIdx])
             {
@@ -2086,11 +2196,13 @@ HbIndex2::Insert(const s64 key, const s64 value)
         }
     }
 
-    for(int i = node->m_NumKeys; i > keyIdx; --i)
+    memmove(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], (node->m_NumKeys-keyIdx) * sizeof(node->m_Keys[0]));
+    memmove(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], (node->m_NumKeys-keyIdx) * sizeof(node->m_Items[0]));
+    /*for(int i = node->m_NumKeys; i > keyIdx; --i)
     {
         node->m_Keys[i] = node->m_Keys[i-1];
         node->m_Items[i] = node->m_Items[i-1];
-    }
+    }*/
 
     node->m_Keys[keyIdx] = key;
     node->m_Items[keyIdx].m_Value = value;
@@ -2146,6 +2258,34 @@ HbIndex2::Validate()
     }
 }
 
+//private:
+
+void
+HbIndex2::TrimNode(HbIndexNode2* node, const int depth)
+{
+    const bool isLeaf = (depth == m_Depth-1);
+
+    for(int i = node->m_NumKeys; i < (int)ARRAYLEN(node->m_Keys); ++i)
+    {
+        node->m_Keys[i] = 0;
+    }
+
+    if(!isLeaf)
+    {
+        for(int i = node->m_NumKeys+1; i < (int)ARRAYLEN(node->m_Keys)+1; ++i)
+        {
+            node->m_Items[i].m_Value = 0;
+        }
+    }
+    else
+    {
+        for(int i = node->m_NumKeys; i < (int)ARRAYLEN(node->m_Keys); ++i)
+        {
+            node->m_Items[i].m_Value = 0;
+        }
+    }
+}
+
 void
 HbIndex2::ValidateNode(const int depth, HbIndexNode2* node)
 {
@@ -2154,6 +2294,7 @@ HbIndex2::ValidateNode(const int depth, HbIndexNode2* node)
         assert(node->m_Keys[i] > node->m_Keys[i-1]);
     }
 
+    //DO NOT SUBMIT
     /*for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
     {
         assert(0 == node->m_Keys[i]);
@@ -2180,7 +2321,10 @@ HbIndex2::ValidateNode(const int depth, HbIndexNode2* node)
             assert(child->m_Keys[j] >= key);
         }
 
-        ValidateNode(depth+1, node->m_Items[0].m_Node);
+        for(int i = 0; i < node->m_NumKeys+1; ++i)
+        {
+            ValidateNode(depth+1, node->m_Items[i].m_Node);
+        }
     }
 }
 
@@ -2219,7 +2363,7 @@ HbIndex2::UpperBound(const s64 key, const s64* first, const s64* end)
 
 int main(int /*argc*/, char** /*argv*/)
 {
-    const int numKeys = 1000000;
+    const int numKeys = 10000000;
     s64* keys = new s64[numKeys];
     HbIndex2 index2;
     for(int i = 0; i < numKeys; ++i)
@@ -2236,9 +2380,11 @@ int main(int /*argc*/, char** /*argv*/)
     for(int i = 0; i < numKeys; ++i)
     {
         index2.Insert(keys[i], keys[i]);
+        //index2.Validate();
+        //assert(index2.Find(keys[i], &value) && value == keys[i]);
     }
 
-    index2.Validate();
+    //index2.Validate();
 
     for(int i = 0; i < numKeys; ++i)
     {
@@ -2251,10 +2397,6 @@ int main(int /*argc*/, char** /*argv*/)
     }
 
     sw.Stop();
-
-    double elapsed = sw.GetElapsed();
-    ++elapsed;
-    --elapsed;
 
     HbStringTest::Test();
     HbDictTest::TestStringString(1024);
