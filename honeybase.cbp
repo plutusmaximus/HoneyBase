@@ -32,6 +32,9 @@
 			<Add option="-Wall" />
 			<Add option="-fexceptions" />
 		</Compiler>
+		<Linker>
+			<Add option="-lrt" />
+		</Linker>
 		<Unit filename="dict.cpp" />
 		<Unit filename="hb.h" />
 		<Extensions>
