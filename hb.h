@@ -33,6 +33,8 @@ typedef u8          byte;
 
 #define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
 
+#define hbVerify(cond) ((cond) || (DebugBreak(),false))
+
 enum HbItemType
 {
     HB_ITEMTYPE_INVALID,
@@ -205,68 +207,6 @@ public:
     static void TestIntString(const int numKeys);
 };
 
-class HbIndexKey
-{
-    friend class HbIndexNode;
-
-public:
-
-    union
-    {
-        s64 m_IntKey;
-        byte* m_KeyBytes;
-    };
-
-private:
-
-    HbIndexKey();
-    ~HbIndexKey(){}
-};
-
-class HbIndexItem
-{
-    friend class HbIndexNode;
-
-public:
-
-    union
-    {
-        s64 m_IntKey;
-        byte* m_KeyBytes;
-    };
-
-    union
-    {
-        int m_Value;
-        HbIndexNode* m_Node;
-    };
-
-private:
-
-    HbIndexItem();
-    ~HbIndexItem(){}
-};
-
-class HbIndexNode
-{
-public:
-
-    HbIndexNode();
-
-    void Dump(const bool leafOnly, const int curDepth, const int maxDepth) const;
-
-    HbIndexItem m_Items[128];
-
-    int m_NumItems;
-
-    void LinkBefore(HbIndexNode* node);
-    void LinkAfter(HbIndexNode* node);
-    void Unlink();
-
-    HbIndexNode* m_Next;
-    HbIndexNode* m_Prev;
-};
-
 class HbIterator
 {
     friend class HbIndex;
@@ -277,20 +217,51 @@ public:
     void Clear();
 
     bool HasNext() const;
-    bool HasPrev() const;
     bool HasCurrent() const;
 
-    void Next();
-    void Prev();
+    bool Next();
 
     s64 GetKey();
-    int GetValue();
+    s64 GetValue();
 
 private:
 
-    HbIndexNode* m_First;
     HbIndexNode* m_Cur;
     int m_ItemIndex;
+};
+
+class HbIndexNode;
+
+class HbIndexItem
+{
+public:
+
+    HbIndexItem()
+        : m_Value(0)
+    {
+    }
+
+    union
+    {
+        s64 m_Value;
+        HbIndexNode* m_Node;
+    };
+};
+
+class HbIndexNode
+{
+public:
+
+    static const int NUM_KEYS = 3;
+
+    HbIndexNode();
+
+    bool HasDups() const;
+
+    s64 m_Keys[NUM_KEYS];
+    HbIndexItem m_Items[NUM_KEYS+1];
+
+    int m_NumKeys;
 };
 
 class HbIndex
@@ -299,87 +270,13 @@ public:
 
     HbIndex();
 
-    void DumpStats() const;
-
-    void Dump(const bool leafOnly) const;
-
-    bool Insert(const int key, const int value);
-
-    bool Delete(const int key);
-
-    bool GetFirst(HbIterator* it) const;
-
-    bool Find(const int key, int* value) const;
-
-    bool Find(const int key, HbIterator* it) const;
-
-    unsigned Count(const int key) const;
-
-    bool Validate() const;
-
-private:
-
-    static bool ValidateNode(const HbIndexNode* node);
-
-    HbIndexNode* m_Nodes;
-
-    u64 m_Count;
-    u64 m_Capacity;
-    int m_Depth;
-    int m_KeySize;
-};
-
-class HbIndexTest
-{
-public:
-    static void AddRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddSortedKeys(const int numKeys);
-};
-
-class HbIndexNode2;
-
-class HbIndexItem2
-{
-public:
-
-    HbIndexItem2()
-        : m_Value(0)
-    {
-    }
-
-    union
-    {
-        s64 m_Value;
-        HbIndexNode2* m_Node;
-    };
-};
-
-class HbIndexNode2
-{
-public:
-
-    static const int NUM_KEYS = 256;
-
-    HbIndexNode2();
-
-    s64 m_Keys[NUM_KEYS];
-    HbIndexItem2 m_Items[NUM_KEYS+1];
-
-    int m_NumKeys;
-};
-
-class HbIndex2
-{
-public:
-
-    HbIndex2();
-
     bool Insert(const s64 key, const s64 value);
 
     bool Delete(const s64 key);
 
     bool Find(const s64 key, s64* value) const;
+
+    bool GetFirst(HbIterator* it);
 
     unsigned Count(const int key) const;
 
@@ -387,19 +284,59 @@ public:
 
 private:
 
-    void TrimNode(HbIndexNode2* node, const int depth);
+    bool Find(const s64 key,
+            const HbIndexNode** outNode,
+            int* outKeyIdx,
+            const HbIndexNode** outParent,
+            int* outParentKeyIdx) const;
+    bool Find(const s64 key,
+            HbIndexNode** outNode,
+            int* outKeyIdx,
+            HbIndexNode** outParent,
+            int* outParentKeyIdx);
 
-    void ValidateNode(const int depth, HbIndexNode2* node);
+    void MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const int depth);
+    void MergeRight(HbIndexNode* parent, const int keyIdx, const int count, const int depth);
+
+    void TrimNode(HbIndexNode* node, const int depth);
+
+    void ValidateNode(const int depth, HbIndexNode* node);
 
     static int UpperBound(const s64 key, const s64* first, const s64* end);
 
-    HbIndexNode2* m_Nodes;
+    HbIndexNode* m_Nodes;
 
-    HbIndexNode2* m_Leaves;
+    HbIndexNode* m_Leaves;
 
     u64 m_Count;
     u64 m_Capacity;
     int m_Depth;
+};
+
+class HbIndexTest
+{
+public:
+    struct KV
+    {
+        int m_Key;
+        int m_Value;
+        bool m_Added : 1;
+
+        KV()
+        : m_Added(false)
+        {
+        }
+
+        bool operator<(const KV& a) const
+        {
+            return m_Key < a.m_Key;
+        }
+    };
+
+    static void CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range);
+    static void AddRandomKeys(const int numKeys, const bool unique, const int range);
+    static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
+    static void AddSortedKeys(const int numKeys, const bool unique, const int range);
 };
 
 #endif  //__HB_H__

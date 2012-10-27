@@ -51,11 +51,17 @@ static u32 FnvHashBufInitVal(const byte *buf, size_t len, u32 hval)
 static unsigned m_w = 77665;    /* must not be zero */
 static unsigned m_z = 22559;    /* must not be zero */
 
-unsigned HbRand()
+static unsigned HbRand()
 {
     m_z = 36969 * (m_z & 65535) + (m_z >> 16);
     m_w = 18000 * (m_w & 65535) + (m_w >> 16);
     return (m_z << 16) + m_w;  /* 32-bit result */
+}
+
+template<typename T>
+static inline void Move(T* dst, const T* src, const size_t count)
+{
+    memmove(dst, src, count * sizeof(T));
 }
 
 static const size_t PAGE_SIZE   = 8*1024;
@@ -189,18 +195,6 @@ public:
         return item;
     }
 
-    HbIndexNode* AllocIndexNode()
-    {
-        HbIndexNode* node = (HbIndexNode*) AllocMem(sizeof(HbIndexNode));
-
-        if(node)
-        {
-            return new(node) HbIndexNode();
-        }
-
-        return NULL;
-    }
-
 	void FreeMem(void* mem)
 	{
 		free(mem);
@@ -218,12 +212,6 @@ public:
 		}
 
         --s_NumDictItems;
-    }
-
-    void FreeIndexNode(HbIndexNode* node)
-    {
-		node->~HbIndexNode();
-        FreeMem(node);
     }
 };
 
@@ -1051,86 +1039,6 @@ HbDictTest::TestIntString(const int numKeys)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbIndexKey
-///////////////////////////////////////////////////////////////////////////////
-HbIndexKey::HbIndexKey()
-    : m_IntKey(0)
-{
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbIndexItem
-///////////////////////////////////////////////////////////////////////////////
-HbIndexItem::HbIndexItem()
-    : m_IntKey(0)
-    , m_Node(NULL)
-{
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbIndexNode
-///////////////////////////////////////////////////////////////////////////////
-HbIndexNode::HbIndexNode()
-    : m_NumItems(0)
-{
-    m_Next = m_Prev = this;
-}
-
-void
-HbIndexNode::Dump(const bool leafOnly, const int curDepth, const int maxDepth) const
-{
-    static const char INDENT[] = {"                                "};
-    char buf[256];
-    const bool isLeaf = (curDepth == maxDepth);
-    for(int i = 0; i < (int)ARRAYLEN(m_Items); ++i)
-    {
-        if(!leafOnly || isLeaf)
-        {
-            if(i >= m_NumItems)
-            {
-                snprintf(buf, sizeof(buf)-1, "%.*s_", curDepth, INDENT);
-                printf("%s%s%p\n", buf, isLeaf?"L":"", this);
-                continue;
-            }
-            else
-            {
-                snprintf(buf, sizeof(buf)-1, "%.*s%"PRId64"", curDepth, INDENT, (s64)m_Items[i].m_IntKey);
-                printf("%s%s%p\n", buf, isLeaf?"L":"", this);
-            }
-        }
-
-        if(!isLeaf && i < m_NumItems)
-        {
-            m_Items[i].m_Node->Dump(leafOnly, curDepth+1, maxDepth);
-        }
-    }
-}
-
-void
-HbIndexNode::LinkBefore(HbIndexNode* node)
-{
-    m_Next = node;
-    m_Prev = node->m_Prev;
-    node->m_Prev = node->m_Prev->m_Next = this;
-}
-
-void
-HbIndexNode::LinkAfter(HbIndexNode* node)
-{
-    m_Next = node->m_Next;
-    m_Prev = node;
-    node->m_Next = node->m_Next->m_Prev = this;
-}
-
-void
-HbIndexNode::Unlink()
-{
-    m_Prev->m_Next = m_Next;
-    m_Next->m_Prev = m_Prev;
-    m_Next = m_Prev = this;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 //  HbIterator
 ///////////////////////////////////////////////////////////////////////////////
 HbIterator::HbIterator()
@@ -1145,38 +1053,20 @@ HbIterator::~HbIterator()
 void
 HbIterator::Clear()
 {
-    m_First = m_Cur = NULL;
+    m_Cur = NULL;
     m_ItemIndex = 0;
 }
 
 bool
 HbIterator::HasNext() const
 {
-    if(!m_Cur)
+    if(m_Cur)
     {
-        return false;
-    }
-    else if(m_Cur == m_First->m_Prev)
-    {
-        return m_ItemIndex < m_Cur->m_NumItems-1;
+        return (m_ItemIndex < m_Cur->m_NumKeys-1)
+                || (NULL != m_Cur->m_Items[HbIndexNode::NUM_KEYS].m_Node);
     }
 
-    return true;
-}
-
-bool
-HbIterator::HasPrev() const
-{
-    if(!m_Cur)
-    {
-        return false;
-    }
-    else if(m_Cur == m_First)
-    {
-        return m_ItemIndex > 0;
-    }
-
-    return true;
+    return false;
 }
 
 bool
@@ -1185,311 +1075,353 @@ HbIterator::HasCurrent() const
     return NULL != m_Cur;
 }
 
-void
+bool
 HbIterator::Next()
 {
-    if(HasNext())
+    if(m_Cur)
     {
         ++m_ItemIndex;
 
-        if(m_ItemIndex >= m_Cur->m_NumItems)
+        if(m_ItemIndex >= m_Cur->m_NumKeys)
         {
-            m_Cur = m_Cur->m_Next;
+            m_Cur = m_Cur->m_Items[HbIndexNode::NUM_KEYS].m_Node;
             m_ItemIndex = 0;
         }
     }
-    else
-    {
-        m_Cur = NULL;
-    }
-}
 
-void
-HbIterator::Prev()
-{
-    if(HasPrev())
-    {
-        --m_ItemIndex;
-
-        if(m_ItemIndex < 0)
-        {
-            m_Cur = m_Cur->m_Prev;
-            m_ItemIndex = m_Cur->m_NumItems;
-        }
-    }
-    else
-    {
-        m_Cur = NULL;
-    }
+    return (NULL != m_Cur);
 }
 
 s64
 HbIterator::GetKey()
 {
-    return m_Cur->m_Items[m_ItemIndex].m_IntKey;
+    return m_Cur->m_Keys[m_ItemIndex];
 }
 
-int
+s64
 HbIterator::GetValue()
 {
     return m_Cur->m_Items[m_ItemIndex].m_Value;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbIndex
+//  HbIndexNode
 ///////////////////////////////////////////////////////////////////////////////
-static int LowerBound(const int key, HbIndexItem* first, HbIndexItem* end)
+HbIndexNode::HbIndexNode()
+: m_NumKeys(0)
 {
-    size_t count = end - first;
-    HbIndexItem* cur = first;
-    while(count > 0)
-    {
-        HbIndexItem* item = cur;
-        size_t step = count >> 1;
-        item += step;
-        if(item->m_IntKey < key)
-        {
-            cur = ++item;
-            count -= step + 1;
-        }
-        else
-        {
-            count = step;
-        }
-    }
-
-    return cur - first;
-}
-
-static int UpperBound(const int key, HbIndexItem* first, HbIndexItem* end)
-{
-    size_t count = end - first;
-    HbIndexItem* cur = first;
-    while(count > 0)
-    {
-        HbIndexItem* item = cur;
-        size_t step = count >> 1;
-        item += step;
-        if(!(key < item->m_IntKey))
-        {
-            cur = ++item;
-            count -= step + 1;
-        }
-        else
-        {
-            count = step;
-        }
-    }
-
-    return cur - first;
-}
-
-HbIndex::HbIndex()
-    : m_Nodes(NULL)
-    , m_Count(0)
-    , m_Capacity(0)
-    , m_Depth(0)
-    , m_KeySize(0)
-{
-}
-
-void
-HbIndex::DumpStats() const
-{
-    printf("Fill: %"PRIu64"/%"PRIu64" %g\n", m_Count, m_Capacity, (double)m_Count/m_Capacity);
-}
-
-void
-HbIndex::Dump(const bool leafOnly) const
-{
-    m_Nodes->Dump(leafOnly, 0, m_Depth-1);
-
-    DumpStats();
+    memset(m_Keys, 0, sizeof(m_Keys));
 }
 
 bool
-HbIndex::Insert(const int key, const int value)
+HbIndexNode::HasDups() const
 {
-    if(NULL == m_Nodes)
+    return m_NumKeys >= 2
+            && m_Keys[m_NumKeys-1] == m_Keys[m_NumKeys-2];
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbIndex2
+///////////////////////////////////////////////////////////////////////////////
+HbIndex::HbIndex()
+: m_Nodes(NULL)
+, m_Leaves(NULL)
+, m_Count(0)
+, m_Capacity(0)
+, m_Depth(0)
+{
+}
+
+bool
+HbIndex::Insert(const s64 key, const s64 value)
+{
+    if(!m_Nodes)
     {
-        m_Nodes = s_Heap.AllocIndexNode();
+        m_Leaves = m_Nodes = new HbIndexNode();
         if(!m_Nodes)
         {
             return false;
         }
 
-        m_Capacity += ARRAYLEN(m_Nodes->m_Items);
+        m_Capacity += HbIndexNode::NUM_KEYS+1;
         ++m_Depth;
+
+        m_Nodes->m_Keys[0] = key;
+        m_Nodes->m_Items[0].m_Value = value;
+        ++m_Nodes->m_NumKeys;
+
+        ++m_Count;
+
+        return true;
     }
 
     HbIndexNode* node = m_Nodes;
     HbIndexNode* parent = NULL;
-    int itemIdx = 0;
+    int keyIdx = 0;
 
     for(int depth = 0; depth < m_Depth; ++depth)
     {
-        if(ARRAYLEN(node->m_Items) == node->m_NumItems)
+        const bool isLeaf = (depth == m_Depth-1);
+
+#define AUTO_DEFRAG_A 1
+#if AUTO_DEFRAG_A
+        if(HbIndexNode::NUM_KEYS == node->m_NumKeys && parent)
         {
-            HbIndexNode* rightSibling;
-            HbIndexNode* leftSibling;
-
-            //If there's room then move one item from the current
-            //node to one of the siblings.
-            rightSibling = (parent && itemIdx < parent->m_NumItems-1) ? parent->m_Items[itemIdx+1].m_Node : NULL;
-            if(!rightSibling || rightSibling->m_NumItems >= (int)ARRAYLEN(rightSibling->m_Items)-1)
+            HbIndexNode* sibling = NULL;
+            if(keyIdx > 0)
             {
-                rightSibling = NULL;
-                leftSibling = (parent && itemIdx > 0) ? parent->m_Items[itemIdx-1].m_Node : NULL;
-
-                if(leftSibling && leftSibling->m_NumItems >= (int)ARRAYLEN(leftSibling->m_Items)-1)
+                //Left sibling
+                sibling = parent->m_Items[keyIdx-1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    leftSibling = NULL;
+                    MergeLeft(parent, keyIdx, 1, depth);
+
+                    if(key < parent->m_Keys[keyIdx-1])
+                    {
+                        --keyIdx;
+                        node = sibling;
+                    }
+                }
+                else
+                {
+                    sibling = NULL;
                 }
             }
-            else
-            {
-                leftSibling = NULL;
-            }
 
-            if(rightSibling)
+            if(!sibling && keyIdx < parent->m_NumKeys)
             {
-                for(int i = rightSibling->m_NumItems; i > 0; --i)
+                //right sibling
+                sibling = parent->m_Items[keyIdx+1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    rightSibling->m_Items[i] = rightSibling->m_Items[i-1];
+                    MergeRight(parent, keyIdx, 1, depth);
+
+                    if(key >= parent->m_Keys[keyIdx])
+                    {
+                        ++keyIdx;
+                        node = sibling;
+                    }
                 }
-
-                rightSibling->m_Items[0] = node->m_Items[node->m_NumItems-1];
-                ++rightSibling->m_NumItems;
-                --node->m_NumItems;
-                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems-1].m_IntKey;
-
-                if(key > node->m_Items[node->m_NumItems-1].m_IntKey)
+                else
                 {
-                    ++itemIdx;
-                    assert(itemIdx < parent->m_NumItems);
-                    node = rightSibling;
+                    sibling = NULL;
                 }
             }
-            else if(leftSibling)
+        }
+#endif  //AUTO_DEFRAG
+
+#define AUTO_DEFRAG 0
+#if AUTO_DEFRAG
+        if(HbIndexNode::NUM_KEYS == node->m_NumKeys && parent)
+        {
+            HbIndexNode* sibling = NULL;
+            if(keyIdx > 0)
             {
-                leftSibling->m_Items[leftSibling->m_NumItems] = node->m_Items[0];
-
-                for(int i = 0; i < node->m_NumItems-1; ++i)
+                //Left sibling
+                sibling = parent->m_Items[keyIdx-1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    node->m_Items[i] = node->m_Items[i+1];
+                    if(isLeaf)
+                    {
+                        sibling->m_Keys[sibling->m_NumKeys] = node->m_Keys[0];
+                        sibling->m_Items[sibling->m_NumKeys] = node->m_Items[0];
+
+                        Move(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys-1);
+
+                        parent->m_Keys[keyIdx-1] = node->m_Keys[1];
+                    }
+                    else
+                    {
+                        sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
+                        sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
+
+                        Move(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys);
+
+                        parent->m_Keys[keyIdx-1] = node->m_Keys[0];
+                    }
+
+                    Move(&node->m_Keys[0], &node->m_Keys[1], node->m_NumKeys-1);
+
+                    ++sibling->m_NumKeys;
+                    --node->m_NumKeys;
+
+                    //DO NOT SUBMIT
+                    //TrimNode(sibling, depth);
+                    //TrimNode(node, depth);
+                    //ValidateNode(depth-1, parent);
+
+                    if(key < parent->m_Keys[keyIdx-1])
+                    {
+                        --keyIdx;
+                        node = sibling;
+                    }
                 }
-
-                ++leftSibling->m_NumItems;
-                --node->m_NumItems;
-                parent->m_Items[itemIdx-1].m_IntKey = leftSibling->m_Items[leftSibling->m_NumItems-1].m_IntKey;
-
-                if(key <= leftSibling->m_Items[leftSibling->m_NumItems-1].m_IntKey)
+                else
                 {
-                    --itemIdx;
-                    assert(itemIdx >= 0);
-                    node = leftSibling;
+                    sibling = NULL;
                 }
             }
-            else
-            {
-                //Split the node
 
-                HbIndexNode* sibling = s_Heap.AllocIndexNode();
-                if(!sibling)
+            if(!sibling && keyIdx < parent->m_NumKeys)
+            {
+                //right sibling
+                sibling = parent->m_Items[keyIdx+1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    return false;
+                    Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
+
+                    if(isLeaf)
+                    {
+                        Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys);
+
+                        sibling->m_Keys[0] = node->m_Keys[node->m_NumKeys-1];
+                        sibling->m_Items[0] = node->m_Items[node->m_NumKeys-1];
+                        parent->m_Keys[keyIdx] = sibling->m_Keys[0];
+                    }
+                    else
+                    {
+                        Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
+
+                        sibling->m_Keys[0] = parent->m_Keys[keyIdx];
+                        sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
+                        parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
+                    }
+
+                    ++sibling->m_NumKeys;
+                    --node->m_NumKeys;
+
+                    //DO NOT SUBMIT
+                    //TrimNode(sibling, depth);
+                    //TrimNode(node, depth);
+                    //ValidateNode(depth-1, parent);
+
+                    if(key >= parent->m_Keys[keyIdx])
+                    {
+                        ++keyIdx;
+                        node = sibling;
+                    }
+                }
+                else
+                {
+                    sibling = NULL;
+                }
+            }
+        }
+#endif  //AUTO_DEFRAG
+
+        if(HbIndexNode::NUM_KEYS == node->m_NumKeys)
+        {
+            /*if(isLeaf && node->HasDups())
+            {
+                HbIndexNode* newNode = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                if(!newNode
+                    || HbIndexNode::NUM_KEYS == newNode->m_NumKeys
+                    || newNode->m_Keys[0] != node->m_Keys[node->m_NumKeys-1])
+                {
+                    newNode = new HbIndexNode();
+                    m_Capacity += HbIndexNode::NUM_KEYS+1;
+
+                    newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
+                        node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
+                }
+
+                node = newNode;
+            }
+            else*/
+            {
+                //Split the node.
+
+                //Guarantee the splitLoc will always be >= 1;
+                static_assert(HbIndexNode::NUM_KEYS >= 3, "Invalid NUM_KEYS");
+
+                int splitLoc = HbIndexNode::NUM_KEYS / 2;
+
+                //If we have dups, don't split the dups.
+                if(splitLoc < HbIndexNode::NUM_KEYS-1
+                    && node->m_Keys[splitLoc] == node->m_Keys[splitLoc+1])
+                {
+                    splitLoc += UpperBound(node->m_Keys[splitLoc],
+                                            &node->m_Keys[splitLoc],
+                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
+                    assert(splitLoc <= HbIndexNode::NUM_KEYS);
+                }
+
+                HbIndexNode* newNode = new HbIndexNode();
+                m_Capacity += HbIndexNode::NUM_KEYS+1;
+                const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
+                if(numToCopy > 0)
+                {
+                    memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
+                    if(isLeaf)
+                    {
+                        memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
+                        memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
+                        newNode->m_NumKeys = numToCopy;
+                        node->m_NumKeys -= numToCopy;
+                    }
+                    else
+                    {
+                        memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
+                        memcpy(newNode->m_Items, &node->m_Items[splitLoc+1], numToCopy * sizeof(node->m_Items[0]));
+                        newNode->m_NumKeys = numToCopy-1;
+                        node->m_NumKeys -= numToCopy;
+                    }
                 }
 
                 if(!parent)
                 {
-                    parent = s_Heap.AllocIndexNode();
-                    if(!parent)
-                    {
-                        s_Heap.FreeIndexNode(sibling);
-                        return false;
-                    }
-
-                    parent->m_Items[parent->m_NumItems++].m_Node = node;
-                    m_Nodes = parent;
-                    m_Capacity += ARRAYLEN(parent->m_Items);
-
+                    parent = m_Nodes = new HbIndexNode();
+                    m_Capacity += HbIndexNode::NUM_KEYS+1;
+                    parent->m_Items[0].m_Node = node;
                     ++m_Depth;
                     ++depth;
                 }
 
-                m_Capacity += ARRAYLEN(sibling->m_Items);
+                Move(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
+                Move(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
 
-                const int splitLoc = ARRAYLEN(node->m_Items) / 2;
-
-                for(int i = splitLoc; i < (int)ARRAYLEN(node->m_Items); ++i, --node->m_NumItems, ++sibling->m_NumItems)
+                if(splitLoc < HbIndexNode::NUM_KEYS)
                 {
-                    sibling->m_Items[sibling->m_NumItems] = node->m_Items[i];
+                    parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
                 }
 
-                for(int i = parent->m_NumItems; i > itemIdx+1; --i)
+                parent->m_Items[keyIdx+1].m_Node = newNode;
+                ++parent->m_NumKeys;
+
+                if(isLeaf)
                 {
-                    parent->m_Items[i] = parent->m_Items[i-1];
+                    newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
+                        node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
                 }
 
-                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems-1].m_IntKey;
-                parent->m_Items[itemIdx+1].m_IntKey = sibling->m_Items[sibling->m_NumItems-1].m_IntKey;
-                parent->m_Items[itemIdx+1].m_Node = sibling;
-                ++parent->m_NumItems;
+                //DO NOT SUBMIT
+                TrimNode(node, depth);
 
-                sibling->LinkAfter(node);
-
-                //if(key >= sibling->m_Items[0].m_IntKey)
-                if(key > node->m_Items[node->m_NumItems-1].m_IntKey)
+                if(key >= parent->m_Keys[keyIdx])
                 {
-                    ++itemIdx;
-                    assert(itemIdx < parent->m_NumItems);
-                    node = sibling;
+                    node = newNode;
                 }
             }
         }
 
-        //Is it an inner node (non-leaf)?
-        if(depth < m_Depth-1)
-        {
-            int newItemIdx = ::UpperBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
-            if(newItemIdx == node->m_NumItems)
-            {
-                --newItemIdx;
-                if(parent)
-                {
-                    parent->m_Items[itemIdx].m_IntKey = key;
-                }
-            }
+        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
 
+        if(!isLeaf)
+        {
             parent = node;
-            node = node->m_Items[newItemIdx].m_Node;
-            itemIdx = newItemIdx;
+            node = parent->m_Items[keyIdx].m_Node;
         }
     }
 
-    const int newItemIdx = ::UpperBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
+    Move(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], node->m_NumKeys-keyIdx);
+    Move(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], node->m_NumKeys-keyIdx);
 
-    if(newItemIdx < node->m_NumItems)
-    {
-        for(int i = node->m_NumItems; i > newItemIdx; --i)
-        {
-            node->m_Items[i] = node->m_Items[i-1];
-        }
-        node->m_Items[newItemIdx].m_IntKey = key;
-        node->m_Items[newItemIdx].m_Value = value;
-        ++node->m_NumItems;
-    }
-    else
-    {
-        if(parent)
-        {
-            parent->m_Items[itemIdx].m_IntKey = key;
-        }
-
-        node->m_Items[newItemIdx].m_IntKey = key;
-        node->m_Items[newItemIdx].m_Value = value;
-        ++node->m_NumItems;
-    }
+    node->m_Keys[keyIdx] = key;
+    node->m_Items[keyIdx].m_Value = value;
+    ++node->m_NumKeys;
 
     ++m_Count;
 
@@ -1497,301 +1429,683 @@ HbIndex::Insert(const int key, const int value)
 }
 
 bool
-HbIndex::Delete(const int key)
+HbIndex::Delete(const s64 key)
 {
-    HbIndexNode* parent = NULL;
     HbIndexNode* node = m_Nodes;
-    int itemIdx = 0;
+    HbIndexNode* parent = NULL;
+    int parentKeyIdx = -1;
+
+    for(int depth = 0; depth < m_Depth-1; ++depth)
+    {
+        if(1 == node->m_NumKeys && parent)
+        {
+            HbIndexNode* sibling = NULL;
+            if(parentKeyIdx < parent->m_NumKeys)
+            {
+                //right sibling
+                sibling = parent->m_Items[parentKeyIdx+1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-2)
+                {
+                    //Move the current node's items to the sibling.
+                    MergeRight(parent, parentKeyIdx, node->m_NumKeys, depth);
+                }
+                else
+                {
+                    //Move an item from the sibling to the current node.
+                    MergeLeft(parent, parentKeyIdx+1, 1, depth);
+                }
+
+                if(0 == node->m_NumKeys)
+                {
+                    delete node;
+
+                    if(0 == sibling->m_NumKeys)
+                    {
+                        delete sibling;
+                        node = parent;
+                        --depth;
+                    }
+                    else
+                    {
+                        node = sibling;
+                    }
+                }
+                else if(0 == sibling->m_NumKeys)
+                {
+                    delete sibling;
+                }
+
+                /*sibling = parent->m_Items[parentKeyIdx+1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-2)
+                {
+                    //Move the current node's items to the sibling and
+                    //delete the current node.
+                    Move(&sibling->m_Keys[2], &sibling->m_Keys[0], sibling->m_NumKeys);
+                    Move(&sibling->m_Items[2], &sibling->m_Items[0], sibling->m_NumKeys+1);
+                    sibling->m_Keys[1] = parent->m_Keys[parentKeyIdx];
+                    sibling->m_Keys[0] = node->m_Keys[0];
+                    sibling->m_Items[1] = node->m_Items[1];
+                    sibling->m_Items[0] = node->m_Items[0];
+                    Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx-1], parentKeyIdx-1);
+                    Move(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx-1], parentKeyIdx-1);
+                    --parent->m_NumKeys;
+                    sibling->m_NumKeys += 2;
+                    delete node;
+                    node = sibling;
+                }
+                else if(1 == sibling->m_NumKeys)
+                {
+                    //Move the last item from the sibling to the current node
+                    //and delete the sibling
+                    node->m_Keys[sibling->m_NumKeys] = parent->m_Keys[parentKeyIdx];
+                    node->m_Keys[sibling->m_NumKeys+1] = sibling->m_Keys[0];
+                    node->m_Items[sibling->m_NumKeys+1] = sibling->m_Items[0];
+                    node->m_Items[sibling->m_NumKeys+2] = sibling->m_Items[1];
+                    Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
+                    Move(&parent->m_Items[parentKeyIdx+1], &parent->m_Items[parentKeyIdx+2], parent->m_NumKeys-parentKeyIdx);
+                    --parent->m_NumKeys;
+                    node->m_NumKeys += 2;
+                    delete sibling;
+                }
+                else
+                {
+                    //Move an item from the sibling to the current node.
+                    node->m_Keys[1] = parent->m_Keys[parentKeyIdx];
+                    parent->m_Keys[parentKeyIdx] = sibling->m_Keys[0];
+                    node->m_Items[2] = sibling->m_Items[0];
+
+                    Move(&sibling->m_Keys[0], &sibling->m_Keys[1], sibling->m_NumKeys-1);
+                    Move(&sibling->m_Items[0], &sibling->m_Items[1], sibling->m_NumKeys);
+                    --sibling->m_NumKeys;
+                    ++node->m_NumKeys;
+                }*/
+            }
+            else if(parentKeyIdx > 0)
+            {
+                //Left sibling
+                sibling = parent->m_Items[parentKeyIdx-1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-2)
+                {
+                    //Move the current node's items to the sibling.
+                    MergeLeft(parent, parentKeyIdx, node->m_NumKeys, depth);
+                }
+                else
+                {
+                    //Move an item from the sibling to the current node.
+                    MergeLeft(parent, parentKeyIdx-1, 1, depth);
+                }
+
+                if(0 == node->m_NumKeys)
+                {
+                    delete node;
+
+                    if(0 == sibling->m_NumKeys)
+                    {
+                        delete sibling;
+                        node = parent;
+                        --depth;
+                    }
+                    else
+                    {
+                        node = sibling;
+                    }
+                }
+                else if(0 == sibling->m_NumKeys)
+                {
+                    delete sibling;
+                }
+
+                /*sibling = parent->m_Items[parentKeyIdx-1].m_Node;
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-2)
+                {
+                    //Move the current node's items to the sibling and
+                    //delete the current node.
+                    sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[parentKeyIdx];
+                    sibling->m_Keys[sibling->m_NumKeys+1] = node->m_Keys[0];
+                    sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
+                    sibling->m_Items[sibling->m_NumKeys+2] = node->m_Items[1];
+                    Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
+                    Move(&parent->m_Items[parentKeyIdx+1], &parent->m_Items[parentKeyIdx+2], parent->m_NumKeys-parentKeyIdx);
+                    --parent->m_NumKeys;
+                    sibling->m_NumKeys += 2;
+                    delete node;
+                    --parentKeyIdx;
+                    node = sibling;
+                }
+                else if(1 == sibling->m_NumKeys)
+                {
+                    //Move the last item from the sibling to the current node
+                    //and delete the sibling
+                    node->m_Keys[2] = node->m_Keys[0];
+                    node->m_Keys[1] = parent->m_Keys[parentKeyIdx];
+                    node->m_Keys[0] = sibling->m_Keys[0];
+                    node->m_Items[3] = node->m_Items[1];
+                    node->m_Items[2] = node->m_Items[0];
+                    node->m_Items[1] = sibling->m_Items[1];
+                    node->m_Items[0] = sibling->m_Items[0];
+                    Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx-1], parentKeyIdx-1);
+                    Move(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx-1], parentKeyIdx-1);
+                    --parent->m_NumKeys;
+                    node->m_NumKeys += 2;
+                    delete sibling;
+                }
+                else
+                {
+                    //Move an item from the sibling to the current node.
+                    node->m_Keys[1] = node->m_Keys[0];
+                    node->m_Items[2] = node->m_Items[1];
+                    node->m_Items[1] = node->m_Items[0];
+
+                    node->m_Keys[0] = parent->m_Keys[parentKeyIdx];
+                    node->m_Items[0] = sibling->m_Items[sibling->m_NumKeys];
+                    parent->m_Keys[parentKeyIdx] = sibling->m_Keys[sibling->m_NumKeys-1];
+                    --sibling->m_NumKeys;
+                    ++node->m_NumKeys;
+                }*/
+            }
+        }
+
+        parentKeyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        parent = node;
+        node = parent->m_Items[parentKeyIdx].m_Node;
+    }
+
+    int keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+
+    if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
+    {
+        --keyIdx;
+        if(key == node->m_Keys[keyIdx])
+        {
+            if(node->m_NumKeys > 1)
+            {
+                Move(&node->m_Keys[keyIdx], &node->m_Keys[keyIdx+1], node->m_NumKeys-keyIdx);
+                Move(&node->m_Items[keyIdx], &node->m_Items[keyIdx+1], node->m_NumKeys-keyIdx);
+
+                --node->m_NumKeys;
+
+                //DO NOT SUBMIT
+                TrimNode(node, m_Depth-1);
+                if(parent)
+                {
+                    ValidateNode(m_Depth-2, parent);
+                }
+            }
+            else
+            {
+                if(parent)
+                {
+                    if(parentKeyIdx > 0)
+                    {
+                        parent->m_Items[parentKeyIdx-1].m_Node = parent->m_Items[parentKeyIdx].m_Node;
+                    }
+
+                    Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
+                    Move(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
+
+                    --parent->m_NumKeys;
+
+                    if(0 == parent->m_NumKeys)
+                    {
+                        assert(parent == m_Nodes);
+
+                        HbIndexNode* child = parent->m_Items[0].m_Node;
+                        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+                        Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+
+                        parent->m_NumKeys = child->m_NumKeys;
+                        child->m_NumKeys = 0;
+                        delete child;
+                        --m_Depth;
+
+                        //DO NOT SUBMIT
+                        TrimNode(parent, m_Depth-1);
+                        ValidateNode(m_Depth-1, parent);
+                    }
+                    else
+                    {
+                        //DO NOT SUBMIT
+                        TrimNode(parent, m_Depth-2);
+                        ValidateNode(m_Depth-2, parent);
+                    }
+                }
+
+                delete node;
+            }
+
+            --m_Count;
+
+            if(0 == m_Count)
+            {
+                assert(node == m_Nodes);
+                m_Nodes = NULL;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool
+HbIndex::Find(const s64 key, s64* value) const
+{
+    const HbIndexNode* node;
+    const HbIndexNode* parent;
+    int keyIdx, parentKeyIdx;
+    if(Find(key, &node, &keyIdx, &parent, &parentKeyIdx))
+    {
+        *value = node->m_Items[keyIdx].m_Value;
+        return true;
+    }
+
+    return false;
+}
+
+bool
+HbIndex::GetFirst(HbIterator* it)
+{
+    if(m_Leaves)
+    {
+        it->m_Cur = m_Leaves;
+        return true;
+    }
+    else
+    {
+        it->Clear();
+    }
+
+    return false;
+}
+
+void
+HbIndex::Validate()
+{
+    if(m_Nodes)
+    {
+        ValidateNode(0, m_Nodes);
+    }
+}
+
+//private:
+
+bool
+HbIndex::Find(const s64 key,
+                const HbIndexNode** outNode,
+                int* outKeyIdx,
+                const HbIndexNode** outParent,
+                int* outParentKeyIdx) const
+{
+    HbIndexNode* tmpNode;
+    HbIndexNode* tmpParent;
+    const bool success =
+        const_cast<HbIndex*>(this)->Find(key, &tmpNode, outKeyIdx, &tmpParent, outParentKeyIdx);
+    *outNode = tmpNode;
+    *outParent = tmpParent;
+    return success;
+}
+
+bool
+HbIndex::Find(const s64 key,
+                HbIndexNode** outNode,
+                int* outKeyIdx,
+                HbIndexNode** outParent,
+                int* outParentKeyIdx)
+{
+    HbIndexNode* node = m_Nodes;
+    HbIndexNode* parent = NULL;
+    int keyIdx = -1;
+    int parentKeyIdx = -1;
 
     for(int depth = 0; depth < m_Depth; ++depth)
     {
-        if(parent && node->m_NumItems < (int)ARRAYLEN(node->m_Items)/2)
+        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        if(depth < m_Depth-1)
         {
-            HbIndexNode* rightSibling = itemIdx < parent->m_NumItems-1 ? parent->m_Items[itemIdx+1].m_Node : NULL;
-            HbIndexNode* leftSibling = itemIdx > 0 ? parent->m_Items[itemIdx-1].m_Node : NULL;
-            HbIndexNode* sibling = NULL;
+            parent = node;
+            parentKeyIdx = keyIdx;
+            node = parent->m_Items[keyIdx].m_Node;
+        }
+    }
 
-            if(rightSibling && (node->m_NumItems + rightSibling->m_NumItems) < (int)ARRAYLEN(node->m_Items))
+    if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
+    {
+        --keyIdx;
+        if(key == node->m_Keys[keyIdx])
+        {
+            *outNode = node;
+            *outParent = parent;
+            *outKeyIdx = keyIdx;
+            *outParentKeyIdx = parentKeyIdx;
+            return true;
+        }
+    }
+
+    *outNode = *outParent = NULL;
+    *outKeyIdx = *outParentKeyIdx = -1;
+    return false;
+}
+
+void
+HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
+{
+    assert(keyIdx > 0);
+
+    HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
+    //Left sibling
+    HbIndexNode* sibling = parent->m_Items[keyIdx-1].m_Node;
+    assert(node->m_NumKeys >= count);
+    assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+
+    if(node->m_NumKeys == count)
+    {
+        if(!hbVerify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        {
+            return;
+        }
+    }
+
+    const bool isLeaf = (depth == m_Depth-1);
+
+    if(!isLeaf)
+    {
+        for(int i = 0; i < count; ++i)
+        {
+            sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
+            parent->m_Keys[keyIdx-1] = node->m_Keys[0];
+            sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
+            Move(&node->m_Keys[0], &node->m_Keys[1], node->m_NumKeys-1);
+            Move(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys);
+            ++sibling->m_NumKeys;
+            --node->m_NumKeys;
+        }
+
+        if(0 == node->m_NumKeys)
+        {
+            sibling->m_Keys[sibling->m_NumKeys++] = parent->m_Keys[keyIdx-1];
+            sibling->m_Items[sibling->m_NumKeys] = node->m_Items[0];
+            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
+            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            --parent->m_NumKeys;
+        }
+    }
+    else
+    {
+        Move(&sibling->m_Keys[sibling->m_NumKeys], &node->m_Keys[0], count);
+        Move(&sibling->m_Items[sibling->m_NumKeys], &node->m_Items[0], count);
+
+        if(count < node->m_NumKeys)
+        {
+            Move(&node->m_Keys[0], &node->m_Keys[count], node->m_NumKeys-count);
+            Move(&node->m_Items[0], &node->m_Items[count], node->m_NumKeys-count);
+
+            parent->m_Keys[keyIdx-1] = node->m_Keys[0];
+        }
+        else
+        {
+            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
+            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            --parent->m_NumKeys;
+        }
+
+        sibling->m_NumKeys += count;
+        node->m_NumKeys -= count;
+    }
+
+    if(0 == parent->m_NumKeys)
+    {
+        assert(parent == m_Nodes);
+
+        HbIndexNode* child = parent->m_Items[0].m_Node;
+        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+        if(isLeaf)
+        {
+            Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+        }
+        else
+        {
+            Move(parent->m_Items, child->m_Items, child->m_NumKeys+1);
+        }
+
+        parent->m_NumKeys = child->m_NumKeys;
+        child->m_NumKeys = 0;
+        --m_Depth;
+    }
+
+    //DO NOT SUBMIT
+    TrimNode(sibling, depth);
+    TrimNode(node, depth);
+    TrimNode(parent, depth-1);
+    ValidateNode(depth-1, parent);
+}
+
+void
+HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
+{
+    assert(keyIdx < parent->m_NumKeys);
+
+    HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
+    //Right sibling
+    HbIndexNode* sibling = parent->m_Items[keyIdx+1].m_Node;
+    assert(node->m_NumKeys >= count);
+    assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+
+    if(node->m_NumKeys == count)
+    {
+        if(!hbVerify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        {
+            return;
+        }
+    }
+
+    const bool isLeaf = (depth == m_Depth-1);
+
+    if(!isLeaf)
+    {
+        for(int i = 0; i < count; ++i)
+        {
+            Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
+            Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
+            sibling->m_Keys[0] = parent->m_Keys[keyIdx];
+            parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
+            sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
+            ++sibling->m_NumKeys;
+            --node->m_NumKeys;
+        }
+
+        if(0 == node->m_NumKeys)
+        {
+            Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
+            Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
+            sibling->m_Keys[0] = parent->m_Keys[keyIdx];
+            sibling->m_Items[0] = node->m_Items[0];
+            Move(&parent->m_Keys[keyIdx], &parent->m_Keys[keyIdx+1], parent->m_NumKeys-keyIdx);
+            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            --parent->m_NumKeys;
+        }
+    }
+    else
+    {
+        Move(&sibling->m_Keys[count], &sibling->m_Keys[0], count);
+        Move(&sibling->m_Items[count], &sibling->m_Items[0], count);
+
+        Move(&sibling->m_Keys[0], &node->m_Keys[node->m_NumKeys-count], count);
+        Move(&sibling->m_Items[0], &node->m_Items[node->m_NumKeys-count], count);
+
+        sibling->m_NumKeys += count;
+        node->m_NumKeys -= count;
+
+        if(node->m_NumKeys > 0)
+        {
+            parent->m_Keys[keyIdx] = sibling->m_Keys[0];
+        }
+        else
+        {
+            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
+            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            --parent->m_NumKeys;
+        }
+    }
+
+    if(0 == parent->m_NumKeys)
+    {
+        assert(parent == m_Nodes);
+
+        HbIndexNode* child = parent->m_Items[0].m_Node;
+        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+        if(isLeaf)
+        {
+            Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+        }
+        else
+        {
+            Move(parent->m_Items, child->m_Items, child->m_NumKeys+1);
+        }
+
+        parent->m_NumKeys = child->m_NumKeys;
+        child->m_NumKeys = 0;
+        --m_Depth;
+    }
+
+    //DO NOT SUBMIT
+    TrimNode(sibling, depth);
+    TrimNode(node, depth);
+    TrimNode(parent, depth-1);
+    ValidateNode(depth-1, parent);
+}
+
+void
+HbIndex::TrimNode(HbIndexNode* node, const int depth)
+{
+    const bool isLeaf = (depth == m_Depth-1);
+
+    for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+    {
+        node->m_Keys[i] = 0;
+    }
+
+    if(!isLeaf)
+    {
+        for(int i = node->m_NumKeys+1; i < HbIndexNode::NUM_KEYS+1; ++i)
+        {
+            node->m_Items[i].m_Value = 0;
+        }
+    }
+    else
+    {
+        for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+        {
+            node->m_Items[i].m_Value = 0;
+        }
+    }
+}
+
+#define ALLOW_DUPS  1
+
+void
+HbIndex::ValidateNode(const int depth, HbIndexNode* node)
+{
+    const bool isLeaf = ((m_Depth-1) == depth);
+
+    if(!isLeaf)
+    {
+        for(int i = 1; i < node->m_NumKeys; ++i)
+        {
+#if ALLOW_DUPS
+            assert(node->m_Keys[i] >= node->m_Keys[i-1]);
+#else
+            assert(node->m_Keys[i] > node->m_Keys[i-1]);
+#endif
+        }
+    }
+    else
+    {
+        //Allow duplicates in the leaves
+        for(int i = 1; i < node->m_NumKeys; ++i)
+        {
+            assert(node->m_Keys[i] >= node->m_Keys[i-1]);
+        }
+    }
+
+    //DO NOT SUBMIT
+    for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+    {
+        assert(0 == node->m_Keys[i]);
+        assert(node->m_Items[i].m_Node != node->m_Items[HbIndexNode::NUM_KEYS].m_Node
+                || 0 == node->m_Items[i].m_Node);
+    }
+
+    if(!isLeaf)
+    {
+        for(int i = 0; i < node->m_NumKeys; ++i)
+        {
+            const s64 key = node->m_Keys[i];
+            const HbIndexNode* child = node->m_Items[i].m_Node;
+            for(int j = 0; j < child->m_NumKeys; ++j)
             {
-                sibling = rightSibling;
-            }
-            else if(leftSibling && (node->m_NumItems + leftSibling->m_NumItems) < (int)ARRAYLEN(node->m_Items))
-            {
-                sibling = node;
-                node = leftSibling;
-                --itemIdx;
-            }
-            else if(rightSibling)
-            {
-                node->m_Items[node->m_NumItems] = rightSibling->m_Items[0];
-                parent->m_Items[itemIdx].m_IntKey = node->m_Items[node->m_NumItems].m_IntKey;
-                ++node->m_NumItems;
-
-                for(int i = 0; i < rightSibling->m_NumItems-1; ++i)
-                {
-                    rightSibling->m_Items[i] = rightSibling->m_Items[i+1];
-                }
-
-                --rightSibling->m_NumItems;
-            }
-            else if(leftSibling)
-            {
-                node->m_Items[node->m_NumItems] = node->m_Items[0];
-                node->m_Items[0] = leftSibling->m_Items[leftSibling->m_NumItems-1];
-                ++node->m_NumItems;
-                parent->m_Items[itemIdx-1].m_IntKey = leftSibling->m_Items[node->m_NumItems-1].m_IntKey;
-                --leftSibling->m_NumItems;
-            }
-
-            if(sibling)
-            {
-                //Merge
-
-                for(int i = 0; i < sibling->m_NumItems; ++i)
-                {
-                    node->m_Items[node->m_NumItems++] = sibling->m_Items[i];
-                }
-
-                parent->m_Items[itemIdx].m_IntKey = parent->m_Items[itemIdx+1].m_IntKey;
-
-                for(int i = itemIdx+1; i < parent->m_NumItems-1; ++i)
-                {
-                    parent->m_Items[i] = parent->m_Items[i+1];
-                }
-
-                sibling->Unlink();
-                m_Capacity -= ARRAYLEN(sibling->m_Items);
-                s_Heap.FreeIndexNode(sibling);
-
-                --parent->m_NumItems;
-
-                if(1 == parent->m_NumItems && 1 == depth)
-                {
-                    m_Nodes = node;
-                    m_Capacity -= ARRAYLEN(parent->m_Items);
-                    s_Heap.FreeIndexNode(parent);
-                    --m_Depth;
-                    --depth;
-                }
+#if ALLOW_DUPS
+                assert(child->m_Keys[j] <= key);
+#else
+                assert(child->m_Keys[j] < key);
+#endif
             }
         }
 
-        const int newItemIdx = ::LowerBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
-        if(newItemIdx >= node->m_NumItems)
+        const s64 key = node->m_Keys[node->m_NumKeys-1];
+        const HbIndexNode* child = node->m_Items[node->m_NumKeys].m_Node;
+        for(int j = 0; j < child->m_NumKeys; ++j)
         {
-            //Doesnt exist
-            return false;
+            assert(child->m_Keys[j] >= key);
         }
 
-        if(depth == m_Depth-1)  //Is it a leaf?
+        for(int i = 0; i < node->m_NumKeys+1; ++i)
         {
-            if(key != node->m_Items[newItemIdx].m_IntKey)
-            {
-                return false;
-            }
-            else if(node->m_NumItems > 1)
-            {
-                for(int i = newItemIdx; i < node->m_NumItems-1; ++i)
-                {
-                    node->m_Items[i] = node->m_Items[i+1];
-                }
+            ValidateNode(depth+1, node->m_Items[i].m_Node);
+        }
+    }
+}
 
-                --node->m_NumItems;
-            }
-            else if(parent)
+int
+HbIndex::UpperBound(const s64 key, const s64* first, const s64* end)
+{
+    if(end > first)
+    {
+        const s64* cur = first;
+
+        /*for(; cur < end; ++cur)
+        {
+            if(key < *cur)
             {
-                for(int i = itemIdx; i < parent->m_NumItems-1; ++i)
-                {
-                    parent->m_Items[i] = parent->m_Items[i+1];
-                }
-
-                --parent->m_NumItems;
-
-                node->Unlink();
-                m_Capacity -= ARRAYLEN(node->m_Items);
-                s_Heap.FreeIndexNode(node);
-
-                assert(parent->m_NumItems > 0);
-            }
-            else
-            {
-                assert(node == m_Nodes);
-                m_Capacity -= ARRAYLEN(node->m_Items);
-                s_Heap.FreeIndexNode(node);
-                m_Nodes = node = NULL;
-                m_Depth = 0;
                 break;
             }
-        }
+        }*/
 
-        parent = node;
-        node = node->m_Items[newItemIdx].m_Node;
-        itemIdx = newItemIdx;
-    }
-
-    --m_Count;
-    return true;
-}
-
-bool
-HbIndex::GetFirst(HbIterator* it) const
-{
-    it->Clear();
-
-    if(m_Nodes)
-    {
-        HbIndexNode* node = m_Nodes;
-
-        for(int depth = 0; depth < m_Depth-1; ++depth)
+        size_t count = end - first;
+        while(count > 0)
         {
-            node = node->m_Items[0].m_Node;
-        }
-
-        it->m_Cur = it->m_First = node;
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HbIndex::Find(const int key, int* value) const
-{
-    HbIterator it;
-
-    if(Find(key, &it))
-    {
-        *value = it.GetValue();
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HbIndex::Find(const int key, HbIterator* it) const
-{
-    if(m_Nodes)
-    {
-        HbIndexNode* node = m_Nodes;
-
-        for(int depth = 0; depth < m_Depth-1 && node; ++depth)
-        {
-            int itemIdx = ::LowerBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
-            if(itemIdx < node->m_NumItems)
+            const s64* item = cur;
+            size_t step = count >> 1;
+            item += step;
+            if(!(key < *item))
             {
-                node = node->m_Items[itemIdx].m_Node;
+                cur = ++item;
+                count -= step + 1;
             }
             else
             {
-                node = NULL;
+                count = step;
             }
         }
 
-        if(node)
-        {
-            int itemIdx = ::LowerBound(key, &node->m_Items[0], &node->m_Items[node->m_NumItems]);
-
-            if(itemIdx < node->m_NumItems && key == node->m_Items[itemIdx].m_IntKey)
-            {
-                it->Clear();
-                it->m_Cur = it->m_First = node;
-                it->m_ItemIndex = itemIdx;
-                return true;
-            }
-        }
+        return cur - first;
     }
 
-    return false;
-}
-
-unsigned
-HbIndex::Count(const int key) const
-{
-    HbIterator it;
-    if(Find(key, &it))
-    {
-        unsigned count = 0;
-        for(; it.HasCurrent() && key == it.GetKey(); it.Next())
-        {
-            ++count;
-        }
-
-        return count;
-    }
-
-    return 0;
-}
-
-bool
-HbIndex::Validate() const
-{
-    if(m_Nodes)
-    {
-        const HbIndexNode* parent = m_Nodes;
-        for(int i = 0; i < m_Depth-1; ++i)
-        {
-            const HbIndexNode* first = parent->m_Items[0].m_Node;
-            const HbIndexNode* cur = first;
-            const HbIndexNode* prev = NULL;
-
-            const HbIndexNode* p = parent;
-            do
-            {
-                for(int j = 0; j < p->m_NumItems; ++j)
-                {
-                    const HbIndexNode* child = p->m_Items[j].m_Node;
-                    if(p->m_Items[j].m_IntKey != child->m_Items[child->m_NumItems-1].m_IntKey)
-                    {
-                        assert(false);
-                        return false;
-                    }
-                }
-            }
-            while(parent != p);
-
-            do
-            {
-                for(int j = 1; j < cur->m_NumItems; ++j)
-                {
-                    if(cur->m_Items[j].m_IntKey < cur->m_Items[j-1].m_IntKey)
-                    {
-                        assert(false);
-                        return false;
-                    }
-                }
-                prev = cur;
-                cur = cur->m_Next;
-
-                if(cur != first && cur->m_Items[0].m_IntKey < prev->m_Items[prev->m_NumItems-1].m_IntKey)
-                {
-                    assert(false);
-                    return false;
-                }
-            }
-            while(cur != first);
-
-            parent = first;
-        }
-    }
-
-    return true;
+    return -1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 //  HbIndexTest
 ///////////////////////////////////////////////////////////////////////////////
-struct TextKv
-{
-    int m_Key;
-    int m_Value;
-    bool m_Added : 1;
-
-    bool operator<(const TextKv& a) const
-    {
-        return m_Key < a.m_Key;
-    }
-};
 
 static ptrdiff_t myrandom (ptrdiff_t i)
 {
@@ -1799,35 +2113,42 @@ static ptrdiff_t myrandom (ptrdiff_t i)
 }
 
 void
+HbIndexTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
+{
+    if(unique)
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            kv[i].m_Key = i;
+        }
+        std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
+    }
+    else
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            kv[i].m_Key = HbRand() % range;
+        }
+    }
+}
+
+void
 HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
 {
     HbIndex index;
-    int value;
+    s64 value;
 
-    int* keys = NULL;
-
-    if(unique)
+    KV* kv = new KV[numKeys];
+    CreateRandomKeys(kv, numKeys, unique, range);
+    for(int i = 0; i < numKeys; ++i)
     {
-        keys = new int[numKeys];
-        for(int i = 0; i < numKeys; ++i)
-        {
-            keys[i] = i;
-        }
-        std::random_shuffle(&keys[0], &keys[numKeys], myrandom);
-    }
-
-    TextKv* kv = new TextKv[numKeys];
-    int i;
-    for(i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Key = unique ? keys[i] : HbRand() % range;
         kv[i].m_Value = i;
         index.Insert(kv[i].m_Key, kv[i].m_Value);
-        assert(index.Find(kv[i].m_Key, &value) && (!unique || value == kv[i].m_Value));
-        //index.Validate();
+        assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
+        index.Validate();
     }
 
-    index.DumpStats();
+    //index.DumpStats();
 
     index.Validate();
 
@@ -1835,20 +2156,21 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 
     std::sort(&kv[0], &kv[numKeys]);
 
-    for(i = 0; i < numKeys; ++i)
+    for(int i = 0; i < numKeys; ++i)
     {
-        assert(index.Find(kv[i].m_Key, &value) && (!unique || value == kv[i].m_Value));
+        assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
     }
 
-    for(i = 0; i < numKeys; ++i)
+    for(int i = 0; i < numKeys; ++i)
     {
         int j = HbRand() % numKeys;
-        assert(index.Find(kv[j].m_Key, &value) && (!unique || value == kv[j].m_Value));
+        assert(index.Find(kv[j].m_Key, &value) && value == kv[j].m_Value);
     }
 
-    for(i = 0; i < numKeys; ++i)
+    for(int i = 0; i < numKeys; ++i)
     {
         assert(index.Delete(kv[i].m_Key));
+        index.Validate();
     }
 
     index.Validate();
@@ -1858,44 +2180,23 @@ void
 HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
 {
     HbIndex index;
-    int value;
+    s64 value;
 
-    int* keys = NULL;
-
-    if(unique)
+    KV* kv = new KV[numKeys];
+    CreateRandomKeys(kv, numKeys, unique, range);
+    for(int i = 0; i < numKeys; ++i)
     {
-        keys = new int[numKeys];
-        for(int i = 0; i < numKeys; ++i)
-        {
-            keys[i] = i;
-        }
-        std::random_shuffle(&keys[0], &keys[numKeys], myrandom);
-    }
-
-    TextKv* kv = new TextKv[numKeys];
-    int i;
-    for(i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Key = unique ? keys[i] : HbRand() % range;
         kv[i].m_Value = i;
-        kv[i].m_Added = false;
     }
-
-    int iii = 0;
 
     for(int i = 0; i < numKeys; ++i)
     {
-        if(11106 == i)
-        {
-            iii = 1;
-        }
-
         int idx = HbRand() % numKeys;
         if(!kv[idx].m_Added)
         {
             index.Insert(kv[idx].m_Key, kv[idx].m_Value);
             kv[idx].m_Added = true;
-            assert(index.Find(kv[idx].m_Key, &value));
+            assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
         }
         else
         {
@@ -1911,7 +2212,7 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
     {
         if(kv[i].m_Added)
         {
-            assert(index.Find(kv[i].m_Key, &value) && (!unique || value == kv[i].m_Value));
+            assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
         }
         else
         {
@@ -1919,7 +2220,7 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         }
     }
 
-    index.DumpStats();
+    //index.DumpStats();
 
     index.Validate();
 
@@ -1927,22 +2228,21 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
 }
 
 void
-HbIndexTest::AddSortedKeys(const int numKeys)
+HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range)
 {
     HbIndex index;
 
-    TextKv* kv = new TextKv[numKeys];
-    int i;
-    for(i = 0; i < numKeys; ++i)
+    KV* kv = new KV[numKeys];
+    CreateRandomKeys(kv, numKeys, unique, range);
+    for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Key = HbRand() % 32767;
+        kv[i].m_Value = i;
     }
 
     std::sort(&kv[0], &kv[numKeys]);
 
-    for(i = 0; i < numKeys; ++i)
+    for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Value = i;
         index.Insert(kv[i].m_Key, kv[i].m_Value);
     }
 
@@ -1950,422 +2250,18 @@ HbIndexTest::AddSortedKeys(const int numKeys)
 
     int count = 0;
     HbIterator it;
-    index.GetFirst(&it);
-    for(; it.HasCurrent(); it.Next())
+    for(bool b = index.GetFirst(&it); b; b = it.Next())
     {
         ++count;
     }
     assert(count == numKeys);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-//  HbIndexNode2
-///////////////////////////////////////////////////////////////////////////////
-HbIndexNode2::HbIndexNode2()
-: m_NumKeys(0)
-{
-    memset(m_Keys, 0, sizeof(m_Keys));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbIndex2
-///////////////////////////////////////////////////////////////////////////////
-HbIndex2::HbIndex2()
-: m_Nodes(NULL)
-, m_Leaves(NULL)
-, m_Count(0)
-, m_Capacity(0)
-, m_Depth(0)
-{
-}
-
-bool
-HbIndex2::Insert(const s64 key, const s64 value)
-{
-    if(!m_Nodes)
-    {
-        m_Leaves = m_Nodes = new HbIndexNode2();
-        if(!m_Nodes)
-        {
-            return false;
-        }
-
-        m_Capacity += ARRAYLEN(m_Nodes->m_Items);
-        ++m_Depth;
-    }
-
-    HbIndexNode2* node = m_Nodes;
-    HbIndexNode2* parent = NULL;
-    int keyIdx = 0;
-
-    for(int depth = 0; depth < m_Depth; ++depth)
-    {
-        const bool isLeaf = (depth == m_Depth-1);
-
-#define AUTO_DEFRAG 1
-#if AUTO_DEFRAG
-        if(ARRAYLEN(node->m_Keys) == node->m_NumKeys)
-        {
-            HbIndexNode2* sibling = NULL;
-            if(parent)
-            {
-                if(keyIdx > 0)
-                {
-                    //Left sibling
-                    sibling = parent->m_Items[keyIdx-1].m_Node;
-                    if(sibling->m_NumKeys < (int)ARRAYLEN(sibling->m_Keys)-1)
-                    {
-                        if(isLeaf)
-                        {
-                            sibling->m_Keys[sibling->m_NumKeys] = node->m_Keys[0];
-                            sibling->m_Items[sibling->m_NumKeys] = node->m_Items[0];
-
-                            memmove(&node->m_Items[0], &node->m_Items[1], (node->m_NumKeys-1) * sizeof(node->m_Items[0]));
-                            /*for(int i = 0; i < node->m_NumKeys-1; ++i)
-                            {
-                                node->m_Items[i] = node->m_Items[i+1];
-                            }*/
-
-                            parent->m_Keys[keyIdx-1] = node->m_Keys[1];
-                        }
-                        else
-                        {
-                            sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
-                            sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
-
-                            memmove(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys * sizeof(node->m_Items[0]));
-                            /*for(int i = 0; i < node->m_NumKeys; ++i)
-                            {
-                                node->m_Items[i] = node->m_Items[i+1];
-                            }*/
-
-                            parent->m_Keys[keyIdx-1] = node->m_Keys[0];
-                        }
-
-                        memmove(&node->m_Keys[0], &node->m_Keys[1], (node->m_NumKeys-1) * sizeof(node->m_Keys[0]));
-                        /*for(int i = 0; i < node->m_NumKeys-1; ++i)
-                        {
-                            node->m_Keys[i] = node->m_Keys[i+1];
-                        }*/
-
-                        ++sibling->m_NumKeys;
-                        --node->m_NumKeys;
-
-                        //DO NOT SUBMIT
-                        //TrimNode(sibling, depth);
-                        //TrimNode(node, depth);
-                        //ValidateNode(depth-1, parent);
-
-                        if(key < parent->m_Keys[keyIdx-1])
-                        {
-                            --keyIdx;
-                            node = sibling;
-                        }
-                    }
-                    else
-                    {
-                        sibling = NULL;
-                    }
-                }
-
-                if(!sibling && keyIdx < parent->m_NumKeys)
-                {
-                    //right sibling
-                    sibling = parent->m_Items[keyIdx+1].m_Node;
-                    if(sibling->m_NumKeys < (int)ARRAYLEN(sibling->m_Keys)-1)
-                    {
-                        memmove(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys * sizeof(sibling->m_Keys[0]));
-                        /*for(int i = sibling->m_NumKeys; i > 0; --i)
-                        {
-                            sibling->m_Keys[i] = sibling->m_Keys[i-1];
-                        }*/
-
-                        if(isLeaf)
-                        {
-                            memmove(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys * sizeof(sibling->m_Items[0]));
-                            /*for(int i = sibling->m_NumKeys; i > 0; --i)
-                            {
-                                sibling->m_Items[i] = sibling->m_Items[i-1];
-                            }*/
-
-                            sibling->m_Keys[0] = node->m_Keys[node->m_NumKeys-1];
-                            sibling->m_Items[0] = node->m_Items[node->m_NumKeys-1];
-                            parent->m_Keys[keyIdx] = sibling->m_Keys[0];
-                        }
-                        else
-                        {
-                            memmove(&sibling->m_Items[1], &sibling->m_Items[0], (sibling->m_NumKeys+1) * sizeof(sibling->m_Items[0]));
-                            /*for(int i = sibling->m_NumKeys+1; i > 0; --i)
-                            {
-                                sibling->m_Items[i] = sibling->m_Items[i-1];
-                            }*/
-
-                            sibling->m_Keys[0] = parent->m_Keys[keyIdx];
-                            sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
-                            parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
-                        }
-
-                        ++sibling->m_NumKeys;
-                        --node->m_NumKeys;
-
-                        //DO NOT SUBMIT
-                        //TrimNode(sibling, depth);
-                        //TrimNode(node, depth);
-                        //ValidateNode(depth-1, parent);
-
-                        if(key >= parent->m_Keys[keyIdx])
-                        {
-                            ++keyIdx;
-                            node = sibling;
-                        }
-                    }
-                    else
-                    {
-                        sibling = NULL;
-                    }
-                }
-            }
-        }
-#endif  //AUTO_DEFRAG
-
-        if(ARRAYLEN(node->m_Keys) == node->m_NumKeys)
-        {
-            const int splitLoc = ARRAYLEN(node->m_Keys) / 2;
-            const int numToCopy = ARRAYLEN(node->m_Keys)-splitLoc;
-            HbIndexNode2* newNode = new HbIndexNode2();
-            m_Capacity += ARRAYLEN(m_Nodes->m_Items);
-            memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
-            if(isLeaf)
-            {
-                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
-                memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
-                newNode->m_NumKeys = numToCopy;
-                node->m_NumKeys -= numToCopy;
-            }
-            else
-            {
-                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
-                memcpy(newNode->m_Items, &node->m_Items[splitLoc+1], numToCopy * sizeof(node->m_Items[0]));
-                newNode->m_NumKeys = numToCopy-1;
-                node->m_NumKeys -= numToCopy;
-            }
-
-            if(!parent)
-            {
-                parent = m_Nodes = new HbIndexNode2();
-                m_Capacity += ARRAYLEN(m_Nodes->m_Items);
-                parent->m_Items[0].m_Node = node;
-                ++m_Depth;
-                ++depth;
-            }
-
-            memmove(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], (parent->m_NumKeys-keyIdx) * sizeof(parent->m_Keys[0]));
-            memmove(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], (parent->m_NumKeys-keyIdx) * sizeof(parent->m_Items[0]));
-            /*for(int i = parent->m_NumKeys; i > keyIdx; --i)
-            {
-                parent->m_Keys[i] = parent->m_Keys[i-1];
-                parent->m_Items[i+1] = parent->m_Items[i];
-            }*/
-
-            parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
-            parent->m_Items[keyIdx+1].m_Node = newNode;
-            ++parent->m_NumKeys;
-
-            if(isLeaf)
-            {
-                newNode->m_Items[ARRAYLEN(newNode->m_Items)-1].m_Node =
-                    node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node;
-                node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node = newNode;
-            }
-
-            //DO NOT SUBMIT
-            //TrimNode(node, depth);
-
-            if(key >= parent->m_Keys[keyIdx])
-            {
-                node = newNode;
-            }
-        }
-
-        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
-
-        if(!isLeaf)
-        {
-            parent = node;
-            node = parent->m_Items[keyIdx].m_Node;
-        }
-    }
-
-    memmove(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], (node->m_NumKeys-keyIdx) * sizeof(node->m_Keys[0]));
-    memmove(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], (node->m_NumKeys-keyIdx) * sizeof(node->m_Items[0]));
-    /*for(int i = node->m_NumKeys; i > keyIdx; --i)
-    {
-        node->m_Keys[i] = node->m_Keys[i-1];
-        node->m_Items[i] = node->m_Items[i-1];
-    }*/
-
-    node->m_Keys[keyIdx] = key;
-    node->m_Items[keyIdx].m_Value = value;
-    ++node->m_NumKeys;
-
-    ++m_Count;
-
-    return true;
-}
-
-bool
-HbIndex2::Find(const s64 key, s64* value) const
-{
-    bool success = false;
-
-    const HbIndexNode2* node = m_Nodes;
-    const HbIndexNode2* parent = NULL;
-    int keyIdx = 0;
-
-    for(int depth = 0; depth < m_Depth-1; ++depth)
-    {
-        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
-        if(depth < m_Depth-1)
-        {
-            parent = node;
-            node = parent->m_Items[keyIdx].m_Node;
-        }
-    }
-
-    for(keyIdx = 0; keyIdx < node->m_NumKeys; ++keyIdx)
-    {
-        if(key == node->m_Keys[keyIdx])
-        {
-            break;
-        }
-    }
-
-    if(keyIdx <= node->m_NumKeys)
-    {
-        *value = node->m_Items[keyIdx].m_Value;
-        success = true;
-    }
-
-    return success;
-}
-
-void
-HbIndex2::Validate()
-{
-    if(m_Nodes)
-    {
-        ValidateNode(0, m_Nodes);
-    }
-}
-
-//private:
-
-void
-HbIndex2::TrimNode(HbIndexNode2* node, const int depth)
-{
-    const bool isLeaf = (depth == m_Depth-1);
-
-    for(int i = node->m_NumKeys; i < (int)ARRAYLEN(node->m_Keys); ++i)
-    {
-        node->m_Keys[i] = 0;
-    }
-
-    if(!isLeaf)
-    {
-        for(int i = node->m_NumKeys+1; i < (int)ARRAYLEN(node->m_Keys)+1; ++i)
-        {
-            node->m_Items[i].m_Value = 0;
-        }
-    }
-    else
-    {
-        for(int i = node->m_NumKeys; i < (int)ARRAYLEN(node->m_Keys); ++i)
-        {
-            node->m_Items[i].m_Value = 0;
-        }
-    }
-}
-
-void
-HbIndex2::ValidateNode(const int depth, HbIndexNode2* node)
-{
-    for(int i = 1; i < node->m_NumKeys; ++i)
-    {
-        assert(node->m_Keys[i] > node->m_Keys[i-1]);
-    }
-
-    //DO NOT SUBMIT
-    /*for(int i = node->m_NumKeys; i < ARRAYLEN(node->m_Keys); ++i)
-    {
-        assert(0 == node->m_Keys[i]);
-        assert(node->m_Items[i].m_Node != node->m_Items[ARRAYLEN(node->m_Items)-1].m_Node
-                || 0 == node->m_Items[i].m_Node);
-    }*/
-
-    if(depth < m_Depth-1)
-    {
-        for(int i = 0; i < node->m_NumKeys; ++i)
-        {
-            const s64 key = node->m_Keys[i];
-            const HbIndexNode2* child = node->m_Items[i].m_Node;
-            for(int j = 0; j < child->m_NumKeys; ++j)
-            {
-                assert(child->m_Keys[j] < key);
-            }
-        }
-
-        const s64 key = node->m_Keys[node->m_NumKeys-1];
-        const HbIndexNode2* child = node->m_Items[node->m_NumKeys].m_Node;
-        for(int j = 0; j < child->m_NumKeys; ++j)
-        {
-            assert(child->m_Keys[j] >= key);
-        }
-
-        for(int i = 0; i < node->m_NumKeys+1; ++i)
-        {
-            ValidateNode(depth+1, node->m_Items[i].m_Node);
-        }
-    }
-}
-
-int
-HbIndex2::UpperBound(const s64 key, const s64* first, const s64* end)
-{
-    const s64* cur = first;
-
-    /*for(; cur < end; ++cur)
-    {
-        if(key < *cur)
-        {
-            break;
-        }
-    }*/
-
-    size_t count = end - first;
-    while(count > 0)
-    {
-        const s64* item = cur;
-        size_t step = count >> 1;
-        item += step;
-        if(!(key < *item))
-        {
-            cur = ++item;
-            count -= step + 1;
-        }
-        else
-        {
-            count = step;
-        }
-    }
-
-    return cur - first;
-}
-
 int main(int /*argc*/, char** /*argv*/)
 {
-    const int numKeys = 10000000;
+    /*const int numKeys = 1000000;
     s64* keys = new s64[numKeys];
-    HbIndex2 index2;
+    HbIndex index;
     for(int i = 0; i < numKeys; ++i)
     {
         keys[i] = i+1;
@@ -2379,7 +2275,7 @@ int main(int /*argc*/, char** /*argv*/)
     s64 value;
     for(int i = 0; i < numKeys; ++i)
     {
-        index2.Insert(keys[i], keys[i]);
+        index.Insert(keys[i], keys[i]);
         //index2.Validate();
         //assert(index2.Find(keys[i], &value) && value == keys[i]);
     }
@@ -2388,15 +2284,15 @@ int main(int /*argc*/, char** /*argv*/)
 
     for(int i = 0; i < numKeys; ++i)
     {
-        assert(index2.Find(i+1, &value) && value == i+1);
+        assert(index.Find(i+1, &value) && value == i+1);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
-        assert(index2.Find(keys[i], &value) && value == keys[i]);
+        assert(index.Find(keys[i], &value) && value == keys[i]);
     }
 
-    sw.Stop();
+    sw.Stop();*/
 
     HbStringTest::Test();
     HbDictTest::TestStringString(1024);
@@ -2405,8 +2301,10 @@ int main(int /*argc*/, char** /*argv*/)
     HbDictTest::TestIntString(1024);
 
     //HbIndexTest::AddDeleteRandomKeys(1024*1024, true, 0);
-    HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
-    HbIndexTest::AddRandomKeys(1024*1024, true, 0);
+    HbIndexTest::AddRandomKeys(1024, true, 32767);
+    //HbIndexTest::AddRandomKeys(10, false, 1);
+    //HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
+    //HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 
-    HbIndexTest::AddSortedKeys(1024*1024);
+    //HbIndexTest::AddSortedKeys(1024*1024, true, 0);
 }
