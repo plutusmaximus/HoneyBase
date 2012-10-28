@@ -33,7 +33,7 @@ typedef u8          byte;
 
 #define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
 
-#define hbVerify(cond) ((cond) || (DebugBreak(),false))
+#define hbVerify(cond) ((cond) || (__debugbreak(),false))
 
 enum HbItemType
 {
@@ -252,7 +252,7 @@ class HbIndexNode
 {
 public:
 
-    static const int NUM_KEYS = 3;
+    static const int NUM_KEYS = 256;
 
     HbIndexNode();
 
@@ -336,7 +336,7 @@ public:
     static void CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range);
     static void AddRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddSortedKeys(const int numKeys, const bool unique, const int range);
+    static void AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending);
 };
 
 #endif  //__HB_H__
