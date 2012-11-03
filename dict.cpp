@@ -164,55 +164,20 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 //  HbHeap
 ///////////////////////////////////////////////////////////////////////////////
-static size_t s_SizeofDictItems;
 static size_t s_NumDictItems;
 class HbHeap
 {
 public:
 
-	void* AllocMem(size_t size)
+	void* Alloc(size_t size)
 	{
 		return calloc(1, size);
 	}
 
-	HbDict::Slot* AllocDictSlots(const size_t numSlots)
-	{
-		return (HbDict::Slot*)AllocMem(sizeof(HbDict::Slot)*numSlots);
-	}
-
-    HbDictItem* AllocDictItem(const size_t sizeofData)
-    {
-		const size_t size = sizeof(HbDictItem)+sizeofData;
-        HbDictItem* item = (HbDictItem*) AllocMem(size);
-
-        if(item)
-        {
-            new(item) HbDictItem();
-			s_SizeofDictItems += size;
-			++s_NumDictItems;
-        }
-
-        return item;
-    }
-
-	void FreeMem(void* mem)
+	void Free(void* mem)
 	{
 		free(mem);
 	}
-
-    void FreeDictItem(HbDictItem* item)
-    {
-		HbDict::Slot* slots =
-			(HB_ITEMTYPE_DICT == item->m_ValType) ? item->m_Value.m_Dict->m_Slots : NULL;
-		item->~HbDictItem();
-        FreeMem(item);
-		if(slots)
-		{
-			FreeMem(slots);
-		}
-
-        --s_NumDictItems;
-    }
 };
 
 static HbHeap s_Heap;
@@ -221,42 +186,25 @@ static HbHeap s_Heap;
 //  HbString
 ///////////////////////////////////////////////////////////////////////////////
 HbString*
-HbString::Create(const char* str)
+HbString::Create(const byte* string, const size_t stringLen)
 {
-    return Create((byte*)str, strlen(str));
-}
-
-HbString*
-HbString::Create(const byte* str, const size_t len)
-{
-    size_t memLen = sizeof(HbString) + len;
-    assert(memLen > len);   //throw
-    size_t tmpLen = len;
-
-    while(tmpLen)
-    {
-        tmpLen >>= 7;
-        ++memLen;
-    }
-
-    HbString* hbs = (HbString*) s_Heap.AllocMem(memLen);
+    const size_t size = Size(stringLen);
+    HbString* hbs = (HbString*) s_Heap.Alloc(size);
     if(hbs)
     {
-        new (hbs) HbString();
-
-        hbs->m_Bytes = (byte*) &hbs[1];
+        byte* bytes = (byte*) hbs;
 
         int offset = 0;
-        tmpLen = len;
+        size_t tmpLen = stringLen;
         while(tmpLen > 0x7F)
         {
-            hbs->m_Bytes[offset++] = 0x80 | (tmpLen & 0x7F);
+            bytes[offset++] = 0x80 | (tmpLen & 0x7F);
             tmpLen >>= 7;
         }
 
-        hbs->m_Bytes[offset++] = tmpLen & 0x7F;
+        bytes[offset++] = tmpLen & 0x7F;
 
-        memcpy(&hbs->m_Bytes[offset], str, len);
+        memcpy(&bytes[offset], string, stringLen);
     }
 
     return hbs;
@@ -266,53 +214,105 @@ void
 HbString::Destroy(HbString* hbs)
 {
     hbs->~HbString();
-    s_Heap.FreeMem(hbs);
+    s_Heap.Free(hbs);
+}
+
+const byte*
+HbString::Data() const
+{
+    const byte* p = (byte*)this;
+    for(; *p & 0x80; ++p)
+    {
+    }
+
+    return ++p;
+}
+
+size_t
+HbString::GetData(const byte** data) const
+{
+    size_t len = 0;
+    const byte* p = (byte*)this;
+    int shift = 0;
+
+    while(*p & 0x80)
+    {
+        len |= (*p++ & 0x7F) << shift;
+        shift += 7;
+    }
+
+    len |= (*p & 0x7F) << shift;
+
+    *data = ++p;
+
+    return len;
 }
 
 size_t
 HbString::Length() const
 {
-    if(m_Bytes)
+    size_t len = 0;
+    const byte* p = (byte*)this;
+    int shift = 0;
+
+    while(*p & 0x80)
     {
-        size_t len = 0;
-        const byte* p = m_Bytes;
-        int shift = 0;
-
-        while(*p & 0x80)
-        {
-            len |= (*p++ & 0x7F) << shift;
-            shift += 7;
-        }
-
-        len |= (*p & 0x7F) << shift;
-
-        return len;
+        len |= (*p++ & 0x7F) << shift;
+        shift += 7;
     }
 
-    return 0;
+    len |= (*p & 0x7F) << shift;
+
+    return len;
+}
+
+size_t
+HbString::Size() const
+{
+    size_t len = 0;
+    const byte* p = (byte*)this;
+    int shift = 0;
+
+    while(*p & 0x80)
+    {
+        len |= (*p++ & 0x7F) << shift;
+        shift += 7;
+    }
+
+    len |= (*p & 0x7F) << shift;
+
+    return len + (p - (byte*)this + 1);
+}
+
+size_t
+HbString::Size(const size_t stringLen)
+{
+    size_t size = stringLen;
+    size_t tmpLen = stringLen;
+
+    while(tmpLen)
+    {
+        tmpLen >>= 7;
+        ++size;
+    }
+
+    return size;
 }
 
 bool
-HbString::operator==(const HbString& that)
+HbString::EQ(const HbString& that) const
 {
-    const size_t mylen = Length();
-    return (that.Length() == mylen
-            && (0 == mylen || 0 == memcmp(m_Bytes, that.m_Bytes, mylen)));
+    const size_t mysize = Size();
+    return (that.Size() == mysize
+            && (0 == mysize || 0 == memcmp(this, &that, mysize)));
 }
 
 bool
-HbString::operator!=(const HbString& that)
+HbString::EQ(const byte* string, const size_t stringLen) const
 {
     const size_t mylen = Length();
-    return (that.Length() != mylen ||
-            (0 != mylen && 0 != memcmp(m_Bytes, that.m_Bytes, mylen)));
-}
-
-//private:
-
-HbString::HbString()
-    : m_Bytes(NULL)
-{
+    return (stringLen == mylen
+            && (0 == mylen || 0 == memcmp(this->Data(), string, mylen)));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -321,8 +321,9 @@ HbString::HbString()
 void
 HbStringTest::Test()
 {
-    HbString* hbs = HbString::Create("Foo");
+    HbString* hbs = HbString::Create((const byte*)"Foo", strlen("Foo"));
     assert(hbs->Length() == 3);
+    assert(0 == memcmp("Foo", hbs->Data(), strlen("Foo")));
     HbString::Destroy(hbs);
 
     size_t len;
@@ -337,6 +338,7 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     assert(hbs->Length() == len);
+    assert(0 == memcmp(str, hbs->Data(), len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -349,6 +351,7 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     assert(hbs->Length() == len);
+    assert(0 == memcmp(str, hbs->Data(), len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -361,6 +364,7 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     assert(hbs->Length() == len);
+    assert(0 == memcmp(str, hbs->Data(), len));
     HbString::Destroy(hbs);
     delete [] str;
 }
@@ -432,92 +436,101 @@ HbStopWatch::GetElapsed() const
 //  HbDictItem
 ///////////////////////////////////////////////////////////////////////////////
 HbDictItem*
-HbDictItem::Create(const char* key, const char* value)
+HbDictItem::Create(const byte* key, const size_t keylen,
+                    const byte* value, const size_t vallen)
 {
-    size_t keylen = strlen(key);
-    HbDictItem* item = s_Heap.AllocDictItem(keylen+strlen(value)+2);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_String = (char*)&item[1];
-        item->m_Value.m_String = item->m_Key.m_String + keylen + 1;
-        strcpy((char*)item->m_Key.m_String, key);
-        strcpy((char*)item->m_Value.m_String, value);
-
         item->m_KeyType = HB_ITEMTYPE_STRING;
         item->m_ValType = HB_ITEMTYPE_STRING;
+
+        if(NULL == (item->m_Key.m_String = HbString::Create(key, keylen))
+            || NULL == (item->m_Value.m_String = HbString::Create(value, vallen)))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
 }
 
 HbDictItem*
-HbDictItem::Create(const char* key, const s64 value)
+HbDictItem::Create(const byte* key, const size_t keylen, const s64 value)
 {
-    size_t keylen = strlen(key);
-    HbDictItem* item = s_Heap.AllocDictItem(keylen+1);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_String = (char*)&item[1];
-        strcpy((char*)item->m_Key.m_String, key);
-        item->m_Value.m_Int = value;
-
         item->m_KeyType = HB_ITEMTYPE_STRING;
         item->m_ValType = HB_ITEMTYPE_INT;
+        item->m_Value.m_Int = value;
+
+        if(NULL == (item->m_Key.m_String = HbString::Create(key, keylen)))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
 }
 
 HbDictItem*
-HbDictItem::Create(const char* key, const double value)
+HbDictItem::Create(const byte* key, const size_t keylen, const double value)
 {
-    size_t keylen = strlen(key);
-    HbDictItem* item = s_Heap.AllocDictItem(keylen+1);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_String = (char*)&item[1];
-        strcpy((char*)item->m_Key.m_String, key);
-        item->m_Value.m_Double = value;
-
         item->m_KeyType = HB_ITEMTYPE_STRING;
         item->m_ValType = HB_ITEMTYPE_DOUBLE;
+        item->m_Value.m_Double = value;
+
+        if(NULL == (item->m_Key.m_String = HbString::Create(key, keylen)))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
 }
 
 HbDictItem*
-HbDictItem::CreateDict(const char* key)
+HbDictItem::CreateDict(const byte* key, const size_t keylen)
 {
-    size_t keylen = strlen(key);
-    HbDictItem* item = s_Heap.AllocDictItem(keylen+1+sizeof(HbDict));
-	assert(item);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_String = (char*)&item[1];
-        item->m_Value.m_Dict = (HbDict*)(item->m_Key.m_String + keylen + 1);
-        new (item->m_Value.m_Dict) HbDict;
-        strcpy((char*)item->m_Key.m_String, key);
-
         item->m_KeyType = HB_ITEMTYPE_STRING;
         item->m_ValType = HB_ITEMTYPE_DICT;
+
+        if(NULL == (item->m_Key.m_String = HbString::Create(key, keylen))
+            || NULL == (item->m_Value.m_Dict = HbDict::Create()))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
 }
 
 HbDictItem*
-HbDictItem::Create(const s64 key, const char* value)
+HbDictItem::Create(const s64 key, const byte* value, const size_t vallen)
 {
-    HbDictItem* item = s_Heap.AllocDictItem(strlen(value)+1);
+    HbDictItem* item = Create();
     if(item)
     {
-		item->m_Key.m_Int = key;
-        item->m_Value.m_String = (char*)&item[1];
-        strcpy((char*)item->m_Value.m_String, value);
-
         item->m_KeyType = HB_ITEMTYPE_INT;
         item->m_ValType = HB_ITEMTYPE_STRING;
+		item->m_Key.m_Int = key;
+
+        if(NULL == (item->m_Value.m_String = HbString::Create(value, vallen)))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
@@ -526,14 +539,13 @@ HbDictItem::Create(const s64 key, const char* value)
 HbDictItem*
 HbDictItem::Create(const s64 key, const s64 value)
 {
-    HbDictItem* item = s_Heap.AllocDictItem(0);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_Int = key;
-        item->m_Value.m_Int = value;
-
         item->m_KeyType = HB_ITEMTYPE_INT;
         item->m_ValType = HB_ITEMTYPE_INT;
+        item->m_Key.m_Int = key;
+        item->m_Value.m_Int = value;
     }
 
     return item;
@@ -542,14 +554,13 @@ HbDictItem::Create(const s64 key, const s64 value)
 HbDictItem*
 HbDictItem::Create(const s64 key, const double value)
 {
-    HbDictItem* item = s_Heap.AllocDictItem(0);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_Int = key;
-        item->m_Value.m_Double = value;
-
         item->m_KeyType = HB_ITEMTYPE_INT;
         item->m_ValType = HB_ITEMTYPE_DOUBLE;
+        item->m_Key.m_Int = key;
+        item->m_Value.m_Double = value;
     }
 
     return item;
@@ -558,16 +569,18 @@ HbDictItem::Create(const s64 key, const double value)
 HbDictItem*
 HbDictItem::CreateDict(const s64 key)
 {
-    HbDictItem* item = s_Heap.AllocDictItem(sizeof(HbDict));
-	assert(item);
+    HbDictItem* item = Create();
     if(item)
     {
-        item->m_Key.m_Int = key;
-        item->m_Value.m_Dict = (HbDict*)&item[1];
-        new (item->m_Value.m_Dict) HbDict;
-
         item->m_KeyType = HB_ITEMTYPE_INT;
         item->m_ValType = HB_ITEMTYPE_DICT;
+        item->m_Key.m_Int = key;
+
+        if(NULL == (item->m_Value.m_Dict = HbDict::Create()))
+        {
+            Destroy(item);
+            item = NULL;
+        }
     }
 
     return item;
@@ -576,21 +589,56 @@ HbDictItem::CreateDict(const s64 key)
 void
 HbDictItem::Destroy(HbDictItem* item)
 {
-    s_Heap.FreeDictItem(item);
+    if(item)
+    {
+        if(HB_ITEMTYPE_STRING == item->m_KeyType)
+        {
+            HbString::Destroy(item->m_Key.m_String);
+            item->m_Key.m_String = NULL;
+        }
+
+        if(HB_ITEMTYPE_STRING == item->m_ValType)
+        {
+            HbString::Destroy(item->m_Value.m_String);
+            item->m_Value.m_String = NULL;
+        }
+        else if(HB_ITEMTYPE_DICT == item->m_ValType)
+        {
+            HbDict::Destroy(item->m_Value.m_Dict);
+            item->m_Value.m_Dict = NULL;
+        }
+
+        item->~HbDictItem();
+        s_Heap.Free(item);
+        --s_NumDictItems;
+    }
+}
+
+//private:
+
+HbDictItem*
+HbDictItem::Create()
+{
+    HbDictItem* item = (HbDictItem*) s_Heap.Alloc(sizeof(HbDictItem));
+
+    if(item)
+    {
+        new(item) HbDictItem();
+		++s_NumDictItems;
+    }
+
+    return item;
 }
 
 HbDictItem::HbDictItem()
+: m_Next(0)
+, m_KeyType(HB_ITEMTYPE_INVALID)
+, m_ValType(HB_ITEMTYPE_INVALID)
 {
 }
 
 HbDictItem::~HbDictItem()
 {
-    if(HB_ITEMTYPE_DICT == m_ValType)
-    {
-        m_Value.m_Dict->~HbDict();
-    }
-
-    memset(this, 0, sizeof(this));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -606,61 +654,62 @@ HbDict::HbDict()
 
 HbDict::~HbDict()
 {
-    for(int i = 0; i < m_NumSlots; ++i)
-    {
-		HbDictItem* item = m_Slots[i].m_Item;
-        HbDictItem* next = item ? item->m_Next : NULL;
-        for(; item; item = next, next = next->m_Next)
-        {
-            HbDictItem::Destroy(item);
-        }
-    }
-
-    memset(this, 0, sizeof(*this));
 }
 
 HbDict*
 HbDict::Create()
 {
-    HbDictItem* item = s_Heap.AllocDictItem(sizeof(HbDict));
-    if(item)
+    HbDict* dict = (HbDict*) s_Heap.Alloc(sizeof(HbDict));
+    if(dict)
     {
-        item->m_Key.m_String = NULL;
-		HbDict* dict = item->m_Value.m_Dict = (HbDict*)&item[1];
-        new (dict) HbDict;
-		dict->m_Slots = s_Heap.AllocDictSlots(HbDict::INITIAL_NUM_SLOTS);
+        new (dict) HbDict();
+		dict->m_Slots = (Slot*) s_Heap.Alloc(INITIAL_NUM_SLOTS * sizeof(Slot));
 		if(dict->m_Slots)
 		{
-			dict->m_NumSlots = HbDict::INITIAL_NUM_SLOTS;
-			item->m_KeyType = HB_ITEMTYPE_INVALID;
-			item->m_ValType = HB_ITEMTYPE_DICT;
+            memset(dict->m_Slots, 0, INITIAL_NUM_SLOTS*sizeof(Slot));
+			dict->m_NumSlots = INITIAL_NUM_SLOTS;
 		}
 		else
 		{
-			s_Heap.FreeDictItem(item);
-			item = NULL;
+            HbDict::Destroy(dict);
+			dict = NULL;
 		}
     }
 
-    return item ? item->m_Value.m_Dict : NULL;
+    return dict;
 }
 
 void
 HbDict::Destroy(HbDict* dict)
 {
-    dict->~HbDict();
+    if(dict)
+    {
+        if(dict->m_Slots)
+        {
+            for(int i = 0; i < dict->m_NumSlots; ++i)
+            {
+		        HbDictItem* item = dict->m_Slots[i].m_Item;
+                HbDictItem* next = item ? item->m_Next : NULL;
+                for(; item; item = next, next = next->m_Next)
+                {
+                    HbDictItem::Destroy(item);
+                }
+            }
 
-    u8* mem = (u8*)dict;
-    mem -= sizeof(HbDictItem);
+            s_Heap.Free(dict->m_Slots);
+            dict->m_Slots = NULL;
+        }
 
-    s_Heap.FreeDictItem((HbDictItem*)mem);
+        dict->~HbDict();
+        s_Heap.Free(dict);
+    }
 }
 
 HbDictItem**
-HbDict::FindItem(const char* key)
+HbDict::FindItem(const byte* key, const size_t keylen)
 {
 	Slot* slot;
-	return FindItem(key, &slot);
+	return FindItem(key, keylen, &slot);
 }
 
 HbDictItem**
@@ -679,7 +728,11 @@ HbDict::Set(HbDictItem* newItem)
 	switch(newItem->m_KeyType)
 	{
 	case HB_ITEMTYPE_STRING:
-		item = FindItem(newItem->m_Key.m_String, &slot);
+        {
+            const byte* data;
+            const size_t keylen = newItem->m_Key.m_String->GetData(&data);
+		    item = FindItem(data, keylen, &slot);
+        }
 		break;
 	case HB_ITEMTYPE_INT:
 		item = FindItem(newItem->m_Key.m_Int, &slot);
@@ -723,38 +776,39 @@ HbDict::Set(HbDictItem* newItem)
 }
 
 void
-HbDict::Set(const char* key, const char* value)
+HbDict::Set(const byte* key, const size_t keylen,
+            const byte* value, const size_t vallen)
 {
-    HbDictItem* newItem = HbDictItem::Create(key, value);
+    HbDictItem* newItem = HbDictItem::Create(key, keylen, value, vallen);
     Set(newItem);
 }
 
 void
-HbDict::Set(const char* key, const s64 value)
+HbDict::Set(const byte* key, const size_t keylen, const s64 value)
 {
-    HbDictItem* newItem = HbDictItem::Create(key, value);
+    HbDictItem* newItem = HbDictItem::Create(key, keylen, value);
     Set(newItem);
 }
 
 void
-HbDict::Set(const char* key, const double value)
+HbDict::Set(const byte* key, const size_t keylen, const double value)
 {
-    HbDictItem* newItem = HbDictItem::Create(key, value);
+    HbDictItem* newItem = HbDictItem::Create(key, keylen, value);
     Set(newItem);
 }
 
 HbDict*
-HbDict::SetDict(const char* key)
+HbDict::SetDict(const byte* key, const size_t keylen)
 {
-    HbDictItem* newItem = HbDictItem::CreateDict(key);
+    HbDictItem* newItem = HbDictItem::CreateDict(key, keylen);
     Set(newItem);
     return newItem->m_Value.m_Dict;
 }
 
 void
-HbDict::Set(const s64 key, const char* value)
+HbDict::Set(const s64 key, const byte* value, const size_t vallen)
 {
-    HbDictItem* newItem = HbDictItem::Create(key, value);
+    HbDictItem* newItem = HbDictItem::Create(key, value, vallen);
     Set(newItem);
 }
 
@@ -781,10 +835,10 @@ HbDict::SetDict(const s64 key)
 }
 
 void
-HbDict::Clear(const char* key)
+HbDict::Clear(const byte* key, const size_t keylen)
 {
 	Slot* slot;
-    HbDictItem** item = FindItem(key, &slot);
+    HbDictItem** item = FindItem(key, keylen, &slot);
     if(*item)
 	{
 		HbDictItem* next = (*item)->m_Next;
@@ -825,19 +879,19 @@ HbDict::Count() const
 //private:
 
 u32
-HbDict::HashString(const char* str)
+HbDict::HashString(const byte* string, const size_t stringLen) const
 {
-    return FnvHashBufInitVal((byte*)str, strlen(str), m_HashSalt);
+    return FnvHashBufInitVal(string, stringLen, m_HashSalt);
 }
 
 HbDictItem**
-HbDict::FindItem(const char* key, Slot** slot)
+HbDict::FindItem(const byte* key, const size_t keylen, Slot** slot)
 {
 	HbDictItem** item = NULL;
 	HbDict* dict = this;
 	while(dict)
 	{
-		const unsigned idx = dict->HashString(key) & (dict->m_NumSlots-1);
+		const unsigned idx = dict->HashString(key, keylen) & (dict->m_NumSlots-1);
 		*slot = &dict->m_Slots[idx];
 		item = &(*slot)->m_Item;
 		if(*item && (*item)->m_ValType == HB_ITEMTYPE_DICT)
@@ -852,7 +906,7 @@ HbDict::FindItem(const char* key, Slot** slot)
 
 	for(; *item; item = &(*item)->m_Next)
 	{
-		if(0 == strcmp((*item)->m_Key.m_String, key))
+		if((*item)->m_Key.m_String->EQ(key, keylen))
 		{
 			return item;
 		}
@@ -904,27 +958,30 @@ HbDictTest::TestStringString(const int numKeys)
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        dict->Set(key, key);
+        dict->Set((byte*)key, keylen, (byte*)key, keylen);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem(key);
+        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
 		assert(*pitem);
-		assert(0 == strcmp((*pitem)->m_Value.m_String, key));
+		assert((*pitem)->m_Value.m_String->EQ((byte*)key, keylen));
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem(key);
+        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
 		assert(*pitem);
-		dict->Clear(key);
-        pitem = dict->FindItem(key);
+		dict->Clear((byte*)key, keylen);
+        pitem = dict->FindItem((byte*)key, keylen);
 		assert(!*pitem);
     }
 
@@ -942,15 +999,17 @@ HbDictTest::TestStringInt(const int numKeys)
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        dict->Set(key, (s64)i);
+        dict->Set((byte*)key, keylen, (s64)i);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem(key);
+        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
 		assert(*pitem);
 		assert(i == (*pitem)->m_Value.m_Int);
     }
@@ -958,11 +1017,12 @@ HbDictTest::TestStringInt(const int numKeys)
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(key, "foo%d", i);
+        const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem(key);
+        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
 		assert(*pitem);
-		dict->Clear(key);
-        pitem = dict->FindItem(key);
+		dict->Clear((byte*)key, keylen);
+        pitem = dict->FindItem((byte*)key, keylen);
 		assert(!*pitem);
     }
 
@@ -1011,17 +1071,19 @@ HbDictTest::TestIntString(const int numKeys)
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(value, "foo%d", i);
+        const size_t vallen = strlen(value);
 
-        dict->Set((s64)i, value);
+        dict->Set((s64)i, (byte*)value, vallen);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
         sprintf(value, "foo%d", i);
+        const size_t vallen = strlen(value);
 
         HbDictItem** pitem = dict->FindItem((s64)i);
 		assert(*pitem);
-		assert(0 == strcmp((*pitem)->m_Value.m_String, value));
+		assert((*pitem)->m_Value.m_String->EQ((byte*)value, vallen));
     }
 
     for(int i = 0; i < numKeys; ++i)
@@ -1121,7 +1183,7 @@ HbIndexNode::HasDups() const
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbIndex2
+//  HbIndex
 ///////////////////////////////////////////////////////////////////////////////
 #define TRIM_NODE   0
 #define AUTO_DEFRAG 1
@@ -1174,7 +1236,9 @@ HbIndex::Insert(const s64 key, const s64 value)
             {
                 //Left sibling
                 sibling = parent->m_Items[keyIdx-1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1
+                    //Don't split dups
+                    && node->m_Keys[0] != node->m_Keys[1])
                 {
                     MergeLeft(parent, keyIdx, 1, depth);
 
@@ -1194,7 +1258,9 @@ HbIndex::Insert(const s64 key, const s64 value)
             {
                 //right sibling
                 sibling = parent->m_Items[keyIdx+1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1
+                    //Don't split dups
+                    && node->m_Keys[node->m_NumKeys-1] != node->m_Keys[node->m_NumKeys-2])
                 {
                     MergeRight(parent, keyIdx, 1, depth);
 
@@ -1214,103 +1280,124 @@ HbIndex::Insert(const s64 key, const s64 value)
 
         if(HbIndexNode::NUM_KEYS == node->m_NumKeys)
         {
-            /*if(isLeaf && node->HasDups())
+            //Split the node.
+
+            //Guarantee the splitLoc will always be >= 1;
+            static_assert(HbIndexNode::NUM_KEYS >= 3, "Invalid NUM_KEYS");
+
+            int splitLoc = HbIndexNode::NUM_KEYS / 2;
+
+            //If we have dups, don't split the dups.
+            if(splitLoc < HbIndexNode::NUM_KEYS-1)
             {
-                HbIndexNode* newNode = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                if(!newNode
-                    || HbIndexNode::NUM_KEYS == newNode->m_NumKeys
-                    || newNode->m_Keys[0] != node->m_Keys[node->m_NumKeys-1])
-                {
-                    newNode = new HbIndexNode();
-                    m_Capacity += HbIndexNode::NUM_KEYS+1;
-
-                    newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
-                        node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
-                }
-
-                node = newNode;
-            }
-            else*/
-            {
-                //Split the node.
-
-                //Guarantee the splitLoc will always be >= 1;
-                static_assert(HbIndexNode::NUM_KEYS >= 3, "Invalid NUM_KEYS");
-
-                int splitLoc = HbIndexNode::NUM_KEYS / 2;
-
-                //If we have dups, don't split the dups.
-                if(splitLoc < HbIndexNode::NUM_KEYS-1
-                    && node->m_Keys[splitLoc] == node->m_Keys[splitLoc+1])
-                {
-                    splitLoc += UpperBound(node->m_Keys[splitLoc],
-                                            &node->m_Keys[splitLoc],
-                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
-                    assert(splitLoc <= HbIndexNode::NUM_KEYS);
-                }
-
-                HbIndexNode* newNode = new HbIndexNode();
-                m_Capacity += HbIndexNode::NUM_KEYS+1;
-                const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
-                if(numToCopy > 0)
-                {
-                    memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
-                    if(isLeaf)
-                    {
-                        memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
-                        memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
-                        newNode->m_NumKeys = numToCopy;
-                        node->m_NumKeys -= numToCopy;
-                    }
-                    else
-                    {
-                        memcpy(newNode->m_Keys, &node->m_Keys[splitLoc+1], (numToCopy-1) * sizeof(node->m_Keys[0]));
-                        memcpy(newNode->m_Items, &node->m_Items[splitLoc+1], numToCopy * sizeof(node->m_Items[0]));
-                        newNode->m_NumKeys = numToCopy-1;
-                        node->m_NumKeys -= numToCopy;
-                    }
-                }
-
-                if(!parent)
-                {
-                    parent = m_Nodes = new HbIndexNode();
-                    m_Capacity += HbIndexNode::NUM_KEYS+1;
-                    parent->m_Items[0].m_Node = node;
-                    ++m_Depth;
-                    ++depth;
-                }
-
-                Move(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
-                Move(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
-
-                if(splitLoc < HbIndexNode::NUM_KEYS)
-                {
-                    parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
-                }
-
-                parent->m_Items[keyIdx+1].m_Node = newNode;
-                ++parent->m_NumKeys;
-
                 if(isLeaf)
                 {
-                    newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
-                        node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
+                    if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc-1])
+                    {
+                        splitLoc += UpperBound(node->m_Keys[splitLoc],
+                                                &node->m_Keys[splitLoc],
+                                                &node->m_Keys[HbIndexNode::NUM_KEYS]);
+                        assert(splitLoc <= HbIndexNode::NUM_KEYS);
+
+                        //If the dups extend to the end of the node it's ok to split
+                        //on the last dup because the item currently being inserted
+                        //will fill the hole.
+                        if(splitLoc == HbIndexNode::NUM_KEYS)
+                        {
+                            --splitLoc;
+                        }
+                    }
                 }
+                else
+                {
+                    if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc+1])
+                    {
+                        splitLoc += UpperBound(node->m_Keys[splitLoc],
+                                                &node->m_Keys[splitLoc],
+                                                &node->m_Keys[HbIndexNode::NUM_KEYS]);
+                        assert(splitLoc <= HbIndexNode::NUM_KEYS);
+
+                        //If the dups extend to the end of the node it's ok to split
+                        //on the last dup because the item currently being inserted
+                        //will fill the hole.
+                        if(splitLoc == HbIndexNode::NUM_KEYS)
+                        {
+                            --splitLoc;
+                        }
+                    }
+                }
+            }
+
+            HbIndexNode* newNode = new HbIndexNode();
+            m_Capacity += HbIndexNode::NUM_KEYS+1;
+            const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
+            assert(numToCopy > 0);
+
+            if(isLeaf)
+            {
+                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
+                memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
+                newNode->m_NumKeys = numToCopy;
+                node->m_NumKeys -= numToCopy;
+            }
+            else
+            {
+                // k0 k1 k2 k3 k4 k5 k6 k7
+                //v0 v1 v2 v3 v4 v5 v6 v7 v8
+
+                // k0 k1 k2 k3    k4 k5 k6 k7
+                //v0 v1 v2 v3    v4 v5 v6 v7 v8
+
+                memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], (numToCopy) * sizeof(node->m_Keys[0]));
+                memcpy(newNode->m_Items, &node->m_Items[splitLoc], (numToCopy+1) * sizeof(node->m_Items[0]));
+                newNode->m_NumKeys = numToCopy;
+                node->m_NumKeys -= numToCopy+1;
+            }
+
+            if(!parent)
+            {
+                parent = m_Nodes = new HbIndexNode();
+                m_Capacity += HbIndexNode::NUM_KEYS+1;
+                parent->m_Items[0].m_Node = node;
+                ++m_Depth;
+                ++depth;
+            }
+
+            assert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
+            Move(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
+            Move(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+
+            if(isLeaf)
+            {
+                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
+            }
+            else
+            {
+                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
+            }
+
+            parent->m_Items[keyIdx+1].m_Node = newNode;
+            ++parent->m_NumKeys;
+
+            if(isLeaf)
+            {
+                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
+                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
+            }
 
 #if TRIM_NODE
-                TrimNode(node, depth);
+            TrimNode(node, depth);
 #endif
 
-                if(key >= parent->m_Keys[keyIdx])
-                {
-                    node = newNode;
-                }
+            if(key > parent->m_Keys[keyIdx])
+            {
+                node = newNode;
             }
         }
 
         keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        assert(keyIdx >= 0);
 
         if(!isLeaf)
         {
@@ -1340,7 +1427,7 @@ HbIndex::Delete(const s64 key)
 
     for(int depth = 0; depth < m_Depth-1; ++depth)
     {
-        if(parent && parent->m_NumKeys > 1)
+        if(parent)// && parent->m_NumKeys > 1)
         {
             HbIndexNode* sibling = NULL;
             HbIndexNode* leftSibling = parentKeyIdx > 0 ? parent->m_Items[parentKeyIdx-1].m_Node : NULL;
@@ -1362,12 +1449,26 @@ HbIndex::Delete(const s64 key)
             {
                 //Borrow one from the left sibling
                 sibling = leftSibling;
+                //DO NOT SUBMIT
+                if(leftSibling->m_NumKeys >= 2
+                    && leftSibling->m_Keys[leftSibling->m_NumKeys-1] == leftSibling->m_Keys[leftSibling->m_NumKeys-2])
+                {
+                    //splitting dups
+                    OutputDebugString("HERE");
+                }
                 MergeRight(parent, parentKeyIdx-1, 1, depth);
             }
             else if(rightSibling && (node->m_NumKeys + rightSibling->m_NumKeys) < HbIndexNode::NUM_KEYS)
             {
                 //Merge with the right sibling
                 sibling = rightSibling;
+                //DO NOT SUBMIT
+                if(rightSibling->m_NumKeys >= 2
+                    && rightSibling->m_Keys[0] == rightSibling->m_Keys[1])
+                {
+                    //splitting dups
+                    OutputDebugString("HERE");
+                }
                 if(node->m_NumKeys < rightSibling->m_NumKeys)
                 {
                     MergeRight(parent, parentKeyIdx, node->m_NumKeys, depth);
@@ -1527,23 +1628,29 @@ HbIndex::GetFirst(HbIterator* it)
     return false;
 }
 
+u64
+HbIndex::Count() const
+{
+    return m_Count;
+}
+
 void
 HbIndex::Validate()
 {
     if(m_Nodes)
     {
         ValidateNode(0, m_Nodes);
-    }
 
-    //Trace down the right edge of the tree and make sure
-    //we reach the last node
-    HbIndexNode* node = m_Nodes;
-    for(int depth = 0; depth < m_Depth-1; ++depth)
-    {
-        node = node->m_Items[node->m_NumKeys].m_Node;
-    }
+        //Trace down the right edge of the tree and make sure
+        //we reach the last node
+        HbIndexNode* node = m_Nodes;
+        for(int depth = 0; depth < m_Depth-1; ++depth)
+        {
+            node = node->m_Items[node->m_NumKeys].m_Node;
+        }
 
-    assert(!node->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+        assert(!node->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+    }
 }
 
 //private:
@@ -1880,12 +1987,24 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
             }
         }
 
+        //Make sure all the keys in the right sibling are >= keys in the left sibling.
         const s64 key = node->m_Keys[node->m_NumKeys-1];
         const HbIndexNode* child = node->m_Items[node->m_NumKeys].m_Node;
         for(int j = 0; j < child->m_NumKeys; ++j)
         {
             assert(child->m_Keys[j] >= key);
         }
+
+        /*for(int i = 0; i < node->m_NumKeys; ++i)
+        {
+            //Make sure we haven't split duplicates
+            const HbIndexNode* a = node->m_Items[i].m_Node;
+            const HbIndexNode* b = node->m_Items[i+1].m_Node;
+            if(a->m_NumKeys < HbIndexNode::NUM_KEYS)
+            {
+                assert(a->m_Keys[a->m_NumKeys-1] != b->m_Keys[0]);
+            }
+        }*/
 
         for(int i = 0; i < node->m_NumKeys+1; ++i)
         {
@@ -1969,11 +2088,16 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 
     KV* kv = new KV[numKeys];
     CreateRandomKeys(kv, numKeys, unique, range);
+    static int iii;
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
         index.Insert(kv[i].m_Key, kv[i].m_Value);
-        assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
+        assert(index.Find(kv[i].m_Key, &value));
+        if(unique)
+        {
+             assert(value == kv[i].m_Value);
+        }
         //index.Validate();
     }
 
@@ -2033,7 +2157,11 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         {
             index.Insert(kv[idx].m_Key, kv[idx].m_Value);
             kv[idx].m_Added = true;
-            assert(index.Find(kv[idx].m_Key, &value) && value == kv[idx].m_Value);
+            assert(index.Find(kv[idx].m_Key, &value));
+            if(unique)
+            {
+                 assert(value == kv[idx].m_Value);
+            }
         }
         else
         {
@@ -2051,7 +2179,11 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
     {
         if(kv[i].m_Added)
         {
-            assert(index.Find(kv[i].m_Key, &value) && value == kv[i].m_Value);
+            assert(index.Find(kv[i].m_Key, &value));
+            if(unique)
+            {
+                 assert(value == kv[i].m_Value);
+            }
         }
         else
         {
@@ -2101,43 +2233,31 @@ HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range
     assert(count == numKeys);
 }
 
+void
+HbIndexTest::AddDups(const int numKeys, const int min, const int max)
+{
+    HbIndex index;
+    const int range = max - min;
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        index.Insert((i%range)+min, i);
+    }
+
+    index.Validate();
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        index.Delete((i%range)+min);
+    }
+
+    index.Validate();
+
+    assert(0 == index.Count());
+}
+
 int main(int /*argc*/, char** /*argv*/)
 {
-    /*const int numKeys = 1000000;
-    s64* keys = new s64[numKeys];
-    HbIndex index;
-    for(int i = 0; i < numKeys; ++i)
-    {
-        keys[i] = i+1;
-    }
-
-    std::random_shuffle(&keys[0], &keys[numKeys]);
-
-    HbStopWatch sw;
-
-    sw.Start();
-    s64 value;
-    for(int i = 0; i < numKeys; ++i)
-    {
-        index.Insert(keys[i], keys[i]);
-        //index2.Validate();
-        //assert(index2.Find(keys[i], &value) && value == keys[i]);
-    }
-
-    //index2.Validate();
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        assert(index.Find(i+1, &value) && value == i+1);
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        assert(index.Find(keys[i], &value) && value == keys[i]);
-    }
-
-    sw.Stop();*/
-
     HbStringTest::Test();
     HbDictTest::TestStringString(1024);
     HbDictTest::TestStringInt(1024);
@@ -2147,9 +2267,12 @@ int main(int /*argc*/, char** /*argv*/)
     //HbIndexTest::AddDeleteRandomKeys(1024*1024, true, 0);
     //HbIndexTest::AddRandomKeys(1024, true, 32767);
     //HbIndexTest::AddRandomKeys(10, false, 1);
-    HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
+    //HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
+    //HbIndexTest::AddRandomKeys(1024*1024, false, 1);
     //HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 
     //HbIndexTest::AddSortedKeys(1024*1024, true, 0, true);
     //HbIndexTest::AddSortedKeys(1024*1024, true, 0, false);
+
+    HbIndexTest::AddDups(1024*1024, 1, 4);
 }

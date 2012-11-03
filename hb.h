@@ -54,23 +54,28 @@ class HbString
 {
 public:
 
-    static HbString* Create(const char* str);
-    static HbString* Create(const byte* str, const size_t len);
+    static HbString* Create(const byte* string, const size_t stringLen);
     static void Destroy(HbString* hbs);
+
+    const byte* Data() const;
+
+    size_t GetData(const byte** data) const;
 
     size_t Length() const;
 
-    bool operator==(const HbString& that);
-    bool operator!=(const HbString& that);
+    size_t Size() const;
+
+    static size_t Size(const size_t stringLen);
+
+    bool EQ(const HbString& that) const;
+    bool EQ(const byte* string, const size_t stringLen) const;
 
 private:
 
-    HbString();
+    HbString(){};
     ~HbString(){}
     HbString(const HbString&);
     HbString& operator=(const HbString&);
-
-    byte* m_Bytes;
 };
 
 class HbStringTest
@@ -102,7 +107,7 @@ union HbValue
 {
     s64 m_Int;
     double m_Double;
-    const char* m_String;
+    HbString* m_String;
     HbDict* m_Dict;
 };
 
@@ -111,11 +116,12 @@ class HbDictItem
     friend class HbHeap;
 public:
 
-    static HbDictItem* Create(const char* key, const char* value);
-    static HbDictItem* Create(const char* key, const s64 value);
-    static HbDictItem* Create(const char* key, const double value);
-    static HbDictItem* CreateDict(const char* key);
-    static HbDictItem* Create(const s64 key, const char* value);
+    static HbDictItem* Create(const byte* key, const size_t keylen,
+                                const byte* value, const size_t vallen);
+    static HbDictItem* Create(const byte* key, const size_t keylen, const s64 value);
+    static HbDictItem* Create(const byte* key, const size_t keylen, const double value);
+    static HbDictItem* CreateDict(const byte* key, const size_t keylen);
+    static HbDictItem* Create(const s64 key, const byte* value, const size_t vallen);
     static HbDictItem* Create(const s64 key, const s64 value);
     static HbDictItem* Create(const s64 key, const double value);
     static HbDictItem* CreateDict(const s64 key);
@@ -129,6 +135,8 @@ public:
     HbItemType m_ValType : 4;
 
 private:
+
+    static HbDictItem* Create();
 
     HbDictItem();
     ~HbDictItem();
@@ -146,20 +154,21 @@ public:
     static HbDict* Create();
     static void Destroy(HbDict* dict);
 
-    HbDictItem** FindItem(const char* key);
+    HbDictItem** FindItem(const byte* key, const size_t keylen);
     HbDictItem** FindItem(const s64 key);
 
     void Set(HbDictItem* item);
-    void Set(const char* key, const char* value);
-    void Set(const char* key, const s64 value);
-    void Set(const char* key, const double value);
-    HbDict* SetDict(const char* key);
-    void Set(const s64 key, const char* value);
+    void Set(const byte* key, const size_t keylen,
+            const byte* value, const size_t vallen);
+    void Set(const byte* key, const size_t keylen, const s64 value);
+    void Set(const byte* key, const size_t keylen, const double value);
+    HbDict* SetDict(const byte* key, const size_t keylen);
+    void Set(const s64 key, const byte* value, const size_t vallen);
     void Set(const s64 key, const s64 value);
     void Set(const s64 key, const double value);
     HbDict* SetDict(const s64 key);
 
-	void Clear(const char* key);
+	void Clear(const byte* key, const size_t keylen);
 	void Clear(const s64 key);
 
     s64 Count() const;
@@ -179,9 +188,9 @@ private:
 		int m_Count;
 	};
 
-	u32 HashString(const char* str);
+	u32 HashString(const byte* string, const size_t stringLen) const;
 
-    HbDictItem** FindItem(const char* key, Slot** slot);
+    HbDictItem** FindItem(const byte* key, const size_t keylen, Slot** slot);
     HbDictItem** FindItem(const s64 key, Slot** slot);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
@@ -278,7 +287,7 @@ public:
 
     bool GetFirst(HbIterator* it);
 
-    unsigned Count(const int key) const;
+    u64 Count() const;
 
     void Validate();
 
@@ -337,6 +346,7 @@ public:
     static void AddRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending);
+    static void AddDups(const int numKeys, const int min, const int max);
 };
 
 #endif  //__HB_H__
