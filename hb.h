@@ -33,6 +33,8 @@ typedef u8          byte;
 
 #define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
 
+#define STATIC_ASSERT(cond) typedef char static_assertion_##__LINE__[(cond)?1:-1]
+
 #define hbVerify(cond) ((cond) || (__debugbreak(),false))
 
 enum HbItemType
@@ -240,6 +242,7 @@ private:
 };
 
 class HbIndexNode;
+class HbIndexLeaf;
 
 class HbIndexItem
 {
@@ -254,14 +257,30 @@ public:
     {
         s64 m_Value;
         HbIndexNode* m_Node;
+        HbIndexLeaf* m_Leaf;
     };
+};
+
+class HbIndexLeaf
+{
+public:
+
+    static const int NUM_KEYS = 256;
+
+    HbIndexLeaf();
+
+    s64 m_Keys[NUM_KEYS];
+    HbIndexItem m_Items[NUM_KEYS];
+    HbIndexLeaf* m_Next;
+
+    int m_NumKeys;
 };
 
 class HbIndexNode
 {
 public:
 
-    static const int NUM_KEYS = 256;
+    static const int NUM_KEYS = HbIndexLeaf::NUM_KEYS;
 
     HbIndexNode();
 
@@ -311,6 +330,14 @@ private:
 
     void ValidateNode(const int depth, HbIndexNode* node);
 
+    HbIndexLeaf* AllocLeaf();
+    void FreeLeaf(HbIndexLeaf* leaf);
+
+    HbIndexNode* AllocNode();
+    void FreeNode(HbIndexNode* node);
+
+    static int Bound(const s64 key, const s64* first, const s64* end);
+    static int LowerBound(const s64 key, const s64* first, const s64* end);
     static int UpperBound(const s64 key, const s64* first, const s64* end);
 
     HbIndexNode* m_Nodes;

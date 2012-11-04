@@ -1167,6 +1167,16 @@ HbIterator::GetValue()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+//  HbIndexLeaf
+///////////////////////////////////////////////////////////////////////////////
+HbIndexLeaf::HbIndexLeaf()
+: m_NumKeys(0)
+, m_Next(NULL)
+{
+    memset(m_Keys, 0, sizeof(m_Keys));
+}
+
+///////////////////////////////////////////////////////////////////////////////
 //  HbIndexNode
 ///////////////////////////////////////////////////////////////////////////////
 HbIndexNode::HbIndexNode()
@@ -1202,13 +1212,12 @@ HbIndex::Insert(const s64 key, const s64 value)
 {
     if(!m_Nodes)
     {
-        m_Leaves = m_Nodes = new HbIndexNode();
+        m_Nodes = m_Leaves = AllocNode();
         if(!m_Nodes)
         {
             return false;
         }
 
-        m_Capacity += HbIndexNode::NUM_KEYS+1;
         ++m_Depth;
 
         m_Nodes->m_Keys[0] = key;
@@ -1282,21 +1291,22 @@ HbIndex::Insert(const s64 key, const s64 value)
         {
             //Split the node.
 
-            //Guarantee the splitLoc will always be >= 1;
-            static_assert(HbIndexNode::NUM_KEYS >= 3, "Invalid NUM_KEYS");
+            //Guarantee the splitLoc will always be >= 2;
+            //See comments below about numToCopy.
+            STATIC_ASSERT(HbIndexNode::NUM_KEYS >= 4);
 
             int splitLoc = HbIndexNode::NUM_KEYS / 2;
 
             //If we have dups, don't split the dups.
-            if(splitLoc < HbIndexNode::NUM_KEYS-1)
+            /*if(splitLoc < HbIndexNode::NUM_KEYS-1)
             {
                 if(isLeaf)
                 {
                     if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc-1])
                     {
-                        splitLoc += UpperBound(node->m_Keys[splitLoc],
-                                                &node->m_Keys[splitLoc],
-                                                &node->m_Keys[HbIndexNode::NUM_KEYS]);
+                        splitLoc += Bound(node->m_Keys[splitLoc],
+                                            &node->m_Keys[splitLoc],
+                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
                         assert(splitLoc <= HbIndexNode::NUM_KEYS);
 
                         //If the dups extend to the end of the node it's ok to split
@@ -1312,9 +1322,9 @@ HbIndex::Insert(const s64 key, const s64 value)
                 {
                     if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc+1])
                     {
-                        splitLoc += UpperBound(node->m_Keys[splitLoc],
-                                                &node->m_Keys[splitLoc],
-                                                &node->m_Keys[HbIndexNode::NUM_KEYS]);
+                        splitLoc += Bound(node->m_Keys[splitLoc],
+                                            &node->m_Keys[splitLoc],
+                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
                         assert(splitLoc <= HbIndexNode::NUM_KEYS);
 
                         //If the dups extend to the end of the node it's ok to split
@@ -1326,15 +1336,20 @@ HbIndex::Insert(const s64 key, const s64 value)
                         }
                     }
                 }
-            }
+            }*/
 
-            HbIndexNode* newNode = new HbIndexNode();
-            m_Capacity += HbIndexNode::NUM_KEYS+1;
+            HbIndexNode* newNode = AllocNode();
             const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
             assert(numToCopy > 0);
 
             if(isLeaf)
             {
+                //k0 k1 k2 k3 k4 k5 k6 k7
+                //v0 v1 v2 v3 v4 v5 v6 v7
+
+                //k0 k1 k2 k3    k4 k5 k6 k7
+                //v0 v1 v2 v3    v4 v5 v6 v7
+
                 memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], numToCopy * sizeof(node->m_Keys[0]));
                 memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
                 newNode->m_NumKeys = numToCopy;
@@ -1351,13 +1366,16 @@ HbIndex::Insert(const s64 key, const s64 value)
                 memcpy(newNode->m_Keys, &node->m_Keys[splitLoc], (numToCopy) * sizeof(node->m_Keys[0]));
                 memcpy(newNode->m_Items, &node->m_Items[splitLoc], (numToCopy+1) * sizeof(node->m_Items[0]));
                 newNode->m_NumKeys = numToCopy;
+                //Subtract an extra one from m_NumKeys because we'll
+                //rotate the last key from node up into parent.
+                //This is also why NUM_KEYS must be >= 4.  It guarantees numToCopy+1
+                //will always be >= 1.
                 node->m_NumKeys -= numToCopy+1;
             }
 
             if(!parent)
             {
-                parent = m_Nodes = new HbIndexNode();
-                m_Capacity += HbIndexNode::NUM_KEYS+1;
+                parent = m_Nodes = AllocNode();
                 parent->m_Items[0].m_Node = node;
                 ++m_Depth;
                 ++depth;
@@ -1370,6 +1388,10 @@ HbIndex::Insert(const s64 key, const s64 value)
             if(isLeaf)
             {
                 parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
+
+                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
+                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
             }
             else
             {
@@ -1378,13 +1400,6 @@ HbIndex::Insert(const s64 key, const s64 value)
 
             parent->m_Items[keyIdx+1].m_Node = newNode;
             ++parent->m_NumKeys;
-
-            if(isLeaf)
-            {
-                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node =
-                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
-            }
 
 #if TRIM_NODE
             TrimNode(node, depth);
@@ -1396,7 +1411,7 @@ HbIndex::Insert(const s64 key, const s64 value)
             }
         }
 
-        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         assert(keyIdx >= 0);
 
         if(!isLeaf)
@@ -1454,7 +1469,7 @@ HbIndex::Delete(const s64 key)
                     && leftSibling->m_Keys[leftSibling->m_NumKeys-1] == leftSibling->m_Keys[leftSibling->m_NumKeys-2])
                 {
                     //splitting dups
-                    OutputDebugString("HERE");
+                    OutputDebugString("HERE\n");
                 }
                 MergeRight(parent, parentKeyIdx-1, 1, depth);
             }
@@ -1462,13 +1477,6 @@ HbIndex::Delete(const s64 key)
             {
                 //Merge with the right sibling
                 sibling = rightSibling;
-                //DO NOT SUBMIT
-                if(rightSibling->m_NumKeys >= 2
-                    && rightSibling->m_Keys[0] == rightSibling->m_Keys[1])
-                {
-                    //splitting dups
-                    OutputDebugString("HERE");
-                }
                 if(node->m_NumKeys < rightSibling->m_NumKeys)
                 {
                     MergeRight(parent, parentKeyIdx, node->m_NumKeys, depth);
@@ -1482,18 +1490,23 @@ HbIndex::Delete(const s64 key)
             {
                 //Borrow one from the right sibling
                 sibling = rightSibling;
+                //DO NOT SUBMIT
+                if(rightSibling->m_NumKeys >= 2
+                    && rightSibling->m_Keys[0] == rightSibling->m_Keys[1])
+                {
+                    //splitting dups
+                    OutputDebugString("HERE\n");
+                }
                 MergeLeft(parent, parentKeyIdx+1, 1, depth);
             }
 
             if(0 == node->m_NumKeys)
             {
-                delete node;
-                m_Capacity -= HbIndexNode::NUM_KEYS;
+                FreeNode(node);
 
                 if(0 == sibling->m_NumKeys)
                 {
-                    delete sibling;
-                    m_Capacity -= HbIndexNode::NUM_KEYS;
+                    FreeNode(sibling);
                     node = parent;
                     --depth;
                 }
@@ -1504,17 +1517,16 @@ HbIndex::Delete(const s64 key)
             }
             else if(sibling && 0 == sibling->m_NumKeys)
             {
-                delete sibling;
-                m_Capacity -= HbIndexNode::NUM_KEYS;
+                FreeNode(sibling);
             }
         }
 
-        parentKeyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        parentKeyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         parent = node;
         node = parent->m_Items[parentKeyIdx].m_Node;
     }
 
-    int keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+    int keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
 
     if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
     {
@@ -1560,8 +1572,7 @@ HbIndex::Delete(const s64 key)
                         Move(parent->m_Items, child->m_Items, child->m_NumKeys);
 
                         parent->m_NumKeys = child->m_NumKeys;
-                        child->m_NumKeys = 0;
-                        delete child;
+                        FreeNode(child);
                         --m_Depth;
 
 #if TRIM_NODE
@@ -1580,7 +1591,7 @@ HbIndex::Delete(const s64 key)
                     }
                 }
 
-                delete node;
+                FreeNode(node);
             }
 
             --m_Count;
@@ -1685,7 +1696,7 @@ HbIndex::Find(const s64 key,
 
     for(int depth = 0; depth < m_Depth; ++depth)
     {
-        keyIdx = UpperBound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         if(depth < m_Depth-1)
         {
             parent = node;
@@ -2013,21 +2024,91 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
     }
 }
 
+HbIndexLeaf*
+HbIndex::AllocLeaf()
+{
+    HbIndexLeaf* leaf = new HbIndexLeaf();
+    if(leaf)
+    {
+        m_Capacity += HbIndexLeaf::NUM_KEYS;
+    }
+
+    return leaf;
+}
+
+void
+HbIndex::FreeLeaf(HbIndexLeaf* leaf)
+{
+    if(leaf)
+    {
+        m_Capacity -= HbIndexLeaf::NUM_KEYS+1;
+        delete leaf;
+    }
+}
+
+HbIndexNode*
+HbIndex::AllocNode()
+{
+    HbIndexNode* node = new HbIndexNode();
+    if(node)
+    {
+        m_Capacity += HbIndexNode::NUM_KEYS+1;
+    }
+
+    return node;
+}
+
+void
+HbIndex::FreeNode(HbIndexNode* node)
+{
+    if(node)
+    {
+        m_Capacity -= HbIndexNode::NUM_KEYS+1;
+        delete node;
+    }
+}
+
+int
+HbIndex::Bound(const s64 key, const s64* first, const s64* end)
+{
+    return UpperBound(key, first, end);
+}
+
+int
+HbIndex::LowerBound(const s64 key, const s64* first, const s64* end)
+{
+    if(end > first)
+    {
+        const s64* cur = first;
+        size_t count = end - first;
+        while(count > 0)
+        {
+            const s64* item = cur;
+            size_t step = count >> 1;
+            item += step;
+            if(key < *item)
+            {
+                cur = ++item;
+                count -= step + 1;
+            }
+            else
+            {
+                count = step;
+            }
+        }
+
+        return cur - first;
+    }
+
+    return -1;
+}
+
 int
 HbIndex::UpperBound(const s64 key, const s64* first, const s64* end)
 {
     if(end > first)
     {
         const s64* cur = first;
-
-        /*for(; cur < end; ++cur)
-        {
-            if(key < *cur)
-            {
-                break;
-            }
-        }*/
-
         size_t count = end - first;
         while(count > 0)
         {
@@ -2237,18 +2318,37 @@ void
 HbIndexTest::AddDups(const int numKeys, const int min, const int max)
 {
     HbIndex index;
-    const int range = max - min;
-
-    for(int i = 0; i < numKeys; ++i)
+    int range = max - min;
+    if(0 == range)
     {
-        index.Insert((i%range)+min, i);
+        for(int i = 0; i < numKeys; ++i)
+        {
+            index.Insert(min, i);
+        }
+    }
+    else
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            index.Insert((i%range)+min, i);
+        }
     }
 
     index.Validate();
 
-    for(int i = 0; i < numKeys; ++i)
+    if(0 == range)
     {
-        index.Delete((i%range)+min);
+        for(int i = 0; i < numKeys; ++i)
+        {
+            assert(index.Delete(min));
+        }
+    }
+    else
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            assert(index.Delete((i%range)+min));
+        }
     }
 
     index.Validate();
@@ -2269,10 +2369,13 @@ int main(int /*argc*/, char** /*argv*/)
     //HbIndexTest::AddRandomKeys(10, false, 1);
     //HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
     //HbIndexTest::AddRandomKeys(1024*1024, false, 1);
-    //HbIndexTest::AddRandomKeys(1024*1024, true, 0);
+    HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 
     //HbIndexTest::AddSortedKeys(1024*1024, true, 0, true);
     //HbIndexTest::AddSortedKeys(1024*1024, true, 0, false);
 
-    HbIndexTest::AddDups(1024*1024, 1, 4);
+    //HbIndexTest::AddDups(1024*1024, 1, 1);
+    //HbIndexTest::AddDups(1024*1024, 1, 2);
+    //HbIndexTest::AddDups(1024*1024, 1, 4);
+    //HbIndexTest::AddDups(9, 1, 3);
 }
