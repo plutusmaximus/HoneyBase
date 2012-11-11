@@ -76,11 +76,18 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="btree.cpp" />
     <ClCompile Include="dict.cpp" />
+    <ClCompile Include="hb.cpp" />
+    <ClCompile Include="main.cpp" />
     <ClCompile Include="record.cpp" />
+    <ClCompile Include="skiplist.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="btree.h" />
+    <ClInclude Include="dict.h" />
     <ClInclude Include="hb.h" />
+    <ClInclude Include="skiplist.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
