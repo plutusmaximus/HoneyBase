@@ -4,6 +4,8 @@
 
 #include <assert.h>
 #include <malloc.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #if _MSC_VER
 #define WIN32_LEAN_AND_MEAN
@@ -20,11 +22,59 @@ unsigned HbRand()
     return (m_z << 16) + m_w;  /* 32-bit result */
 }
 
+unsigned HbRand(const unsigned min, const unsigned max)
+{
+    return min + (HbRand() % (max - min));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbLog
+///////////////////////////////////////////////////////////////////////////////
+HbLog::HbLog()
+{
+    m_Channel[0] = '\0';
+}
+
+HbLog::HbLog(const char* channel)
+{
+    snprintf(m_Channel, sizeof(m_Channel)-1, "%s", channel);
+}
+
+void
+HbLog::Debug(const char* fmt, ...)
+{
+    char prefix[128];
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf)-1, fmt, args);
+    snprintf(prefix, sizeof(prefix), "DBG[%s]: ", m_Channel);
+    fprintf(stdout, "%s%s\n", prefix, buf);
+    OutputDebugString(prefix);
+    OutputDebugString(buf);
+    OutputDebugString("\n");
+}
+
+void
+HbLog::Error(const char* fmt, ...)
+{
+    char prefix[128];
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf)-1, fmt, args);
+    snprintf(prefix, sizeof(prefix), "ERR[%s]: ", m_Channel);
+    fprintf(stdout, "%s%s\n", prefix, buf);
+    OutputDebugString(prefix);
+    OutputDebugString(buf);
+    OutputDebugString("\n");
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  HbHeap
 ///////////////////////////////////////////////////////////////////////////////
 void*
-HbHeap::Alloc(size_t size)
+HbHeap::ZAlloc(size_t size)
 {
 	return calloc(1, size);
 }
@@ -39,10 +89,10 @@ HbHeap::Free(void* mem)
 //  HbString
 ///////////////////////////////////////////////////////////////////////////////
 HbString*
-HbString::Create(const byte* string, const size_t stringLen)
+HbString::Create(const size_t stringLen)
 {
     const size_t size = Size(stringLen);
-    HbString* hbs = (HbString*) HbHeap::Alloc(size);
+    HbString* hbs = (HbString*) HbHeap::ZAlloc(size);
     if(hbs)
     {
         byte* bytes = (byte*) hbs;
@@ -56,8 +106,20 @@ HbString::Create(const byte* string, const size_t stringLen)
         }
 
         bytes[offset++] = tmpLen & 0x7F;
+    }
 
-        memcpy(&bytes[offset], string, stringLen);
+    return hbs;
+}
+
+HbString*
+HbString::Create(const byte* string, const size_t stringLen)
+{
+    HbString* hbs = Create(stringLen);
+    if(hbs && string)
+    {
+        byte* data;
+        hbs->GetData(&data);
+        memcpy(data, string, stringLen);
     }
 
     return hbs;
@@ -68,17 +130,6 @@ HbString::Destroy(HbString* hbs)
 {
     hbs->~HbString();
     HbHeap::Free(hbs);
-}
-
-const byte*
-HbString::Data() const
-{
-    const byte* p = (byte*)this;
-    for(; *p & 0x80; ++p)
-    {
-    }
-
-    return ++p;
 }
 
 size_t
@@ -98,6 +149,15 @@ HbString::GetData(const byte** data) const
 
     *data = ++p;
 
+    return len;
+}
+
+size_t
+HbString::GetData(byte** data)
+{
+    const byte* cdata;
+    const size_t len = GetData(&cdata);
+    *data = (byte*)cdata;
     return len;
 }
 
@@ -143,10 +203,8 @@ HbString::Size(const size_t stringLen)
     size_t size = stringLen;
     size_t tmpLen = stringLen;
 
-    while(tmpLen)
+    for(++size, tmpLen >>= 7; tmpLen; ++size, tmpLen >>= 7)
     {
-        tmpLen >>= 7;
-        ++size;
     }
 
     return size;
@@ -163,9 +221,10 @@ HbString::EQ(const HbString& that) const
 bool
 HbString::EQ(const byte* string, const size_t stringLen) const
 {
-    const size_t mylen = Length();
+    const byte* data;
+    const size_t mylen = GetData(&data);
     return (stringLen == mylen
-            && (0 == mylen || 0 == memcmp(this->Data(), string, mylen)));
+            && (0 == mylen || 0 == memcmp(data, string, mylen)));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -175,11 +234,12 @@ void
 HbStringTest::Test()
 {
     HbString* hbs = HbString::Create((const byte*)"Foo", strlen("Foo"));
-    assert(hbs->Length() == 3);
-    assert(0 == memcmp("Foo", hbs->Data(), strlen("Foo")));
+    const byte* data;
+    size_t len = hbs->GetData(&data);
+    assert(len == 3);
+    assert(0 == memcmp("Foo", data, strlen("Foo")));
     HbString::Destroy(hbs);
 
-    size_t len;
     byte* str;
 
     len = 0x7F + 321;
@@ -190,8 +250,9 @@ HbStringTest::Test()
     }
 
     hbs = HbString::Create(str, len);
+    hbs->GetData(&data);
     assert(hbs->Length() == len);
-    assert(0 == memcmp(str, hbs->Data(), len));
+    assert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -204,7 +265,8 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     assert(hbs->Length() == len);
-    assert(0 == memcmp(str, hbs->Data(), len));
+    hbs->GetData(&data);
+    assert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -217,7 +279,8 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     assert(hbs->Length() == len);
-    assert(0 == memcmp(str, hbs->Data(), len));
+    hbs->GetData(&data);
+    assert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 }

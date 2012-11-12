@@ -246,7 +246,7 @@ HbSkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int ra
         assert(skiplist->Find(kv[i].m_Key, &value));
         if(unique)
         {
-             assert(value == kv[i].m_Value);
+            assert(value == kv[i].m_Value);
         }
     }
     sw.Stop();*/
@@ -257,6 +257,9 @@ HbSkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int ra
         hbVerify(skiplist->Delete(kv[i].m_Key));
     }
     sw.Stop();
+
+    free(skiplist);
+    delete [] kv;
 }
 void
 HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
@@ -281,7 +284,7 @@ HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const 
             assert(skiplist->Find(kv[idx].m_Key, &value));
             if(unique)
             {
-                 assert(value == kv[idx].m_Value);
+                assert(value == kv[idx].m_Value);
             }
         }
         else
@@ -299,7 +302,7 @@ HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const 
             assert(skiplist->Find(kv[i].m_Key, &value));
             if(unique)
             {
-                 assert(value == kv[i].m_Value);
+                assert(value == kv[i].m_Value);
             }
         }
         else
@@ -307,5 +310,8 @@ HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const 
             assert(!skiplist->Find(kv[i].m_Key, &value));
         }
     }
+
+    free(skiplist);
+    delete [] kv;
 }
 

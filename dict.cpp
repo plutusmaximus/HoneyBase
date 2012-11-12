@@ -2,6 +2,7 @@
 
 #include "dict.h"
 
+#include <algorithm>
 #include <assert.h>
 #include <new.h>
 #include <stdio.h>
@@ -245,7 +246,7 @@ HbDictItem::Destroy(HbDictItem* item)
 HbDictItem*
 HbDictItem::Create()
 {
-    HbDictItem* item = (HbDictItem*) HbHeap::Alloc(sizeof(HbDictItem));
+    HbDictItem* item = (HbDictItem*) HbHeap::ZAlloc(sizeof(HbDictItem));
 
     if(item)
     {
@@ -271,11 +272,11 @@ HbDictItem::~HbDictItem()
 //  HbDict
 ///////////////////////////////////////////////////////////////////////////////
 HbDict::HbDict()
-	: m_Slots(NULL)
-	, m_Count(0)
+	: m_Count(0)
 	, m_NumSlots(0)
 	, m_HashSalt(FNV1_32_INIT)
 {
+    m_Slots[0] = m_Slots[1] = NULL;
 }
 
 HbDict::~HbDict()
@@ -285,14 +286,13 @@ HbDict::~HbDict()
 HbDict*
 HbDict::Create()
 {
-    HbDict* dict = (HbDict*) HbHeap::Alloc(sizeof(HbDict));
+    HbDict* dict = (HbDict*) HbHeap::ZAlloc(sizeof(HbDict));
     if(dict)
     {
         new (dict) HbDict();
-		dict->m_Slots = (Slot*) HbHeap::Alloc(INITIAL_NUM_SLOTS * sizeof(Slot));
-		if(dict->m_Slots)
+		dict->m_Slots[0] = (Slot*) HbHeap::ZAlloc(INITIAL_NUM_SLOTS * sizeof(Slot));
+		if(dict->m_Slots[0])
 		{
-            memset(dict->m_Slots, 0, INITIAL_NUM_SLOTS*sizeof(Slot));
 			dict->m_NumSlots = INITIAL_NUM_SLOTS;
 		}
 		else
@@ -310,20 +310,28 @@ HbDict::Destroy(HbDict* dict)
 {
     if(dict)
     {
-        if(dict->m_Slots)
+        for(int i = 0; i < HB_ARRAYLEN(dict->m_Slots); ++i)
         {
-            for(int i = 0; i < dict->m_NumSlots; ++i)
+            Slot* slots = dict->m_Slots[i];
+
+            if(!slots)
             {
-		        HbDictItem* item = dict->m_Slots[i].m_Item;
-                HbDictItem* next = item ? item->m_Next : NULL;
-                for(; item; item = next, next = next->m_Next)
+                continue;
+            }
+
+            for(int j = 0; j < dict->m_NumSlots; ++j)
+            {
+		        HbDictItem* item = slots[j].m_Item;
+                while(item)
                 {
+                    HbDictItem* next = item->m_Next;
                     HbDictItem::Destroy(item);
+                    item = next;
                 }
             }
 
-            HbHeap::Free(dict->m_Slots);
-            dict->m_Slots = NULL;
+            HbHeap::Free(slots);
+            dict->m_Slots[i] = NULL;
         }
 
         dict->~HbDict();
@@ -331,123 +339,190 @@ HbDict::Destroy(HbDict* dict)
     }
 }
 
-HbDictItem**
-HbDict::FindItem(const byte* key, const size_t keylen)
+bool
+HbDict::Find(const s64 key, s64* value) const
 {
-	Slot* slot;
-	return FindItem(key, keylen, &slot);
+    HbDictItem** item = const_cast<HbDict*>(this)->Find(key);
+    if(*item && (*item)->m_ValType == HB_ITEMTYPE_INT)
+    {
+        *value = (*item)->m_Value.m_Int;
+        return true;
+    }
+
+    return false;
 }
 
 HbDictItem**
-HbDict::FindItem(const s64 key)
+HbDict::Find(const byte* key, const size_t keylen)
 {
 	Slot* slot;
-	return FindItem(key, &slot);
+	return Find(key, keylen, &slot);
+}
+
+HbDictItem**
+HbDict::Find(const s64 key)
+{
+	Slot* slot;
+	return Find(key, &slot);
+}
+
+HbDictItem**
+HbDict::Find(const HbString* key)
+{
+	Slot* slot;
+	return Find(key, &slot);
 }
 
 void
 HbDict::Set(HbDictItem* newItem)
 {
-	Slot* slot;
-    HbDictItem** item;
-
-	switch(newItem->m_KeyType)
-	{
-	case HB_ITEMTYPE_STRING:
-        {
-            const byte* data;
-            const size_t keylen = newItem->m_Key.m_String->GetData(&data);
-		    item = FindItem(data, keylen, &slot);
-        }
-		break;
-	case HB_ITEMTYPE_INT:
-		item = FindItem(newItem->m_Key.m_Int, &slot);
-		break;
-    default:
-        item = NULL;
-        slot = NULL;
-        break;
-	}
-
-    assert(item);
-
-    if(!*item)
+	if(m_NumSlots*2 <= m_Count)
     {
-		++slot->m_Count;
+        Slot* newSlots = (Slot*) HbHeap::ZAlloc(m_NumSlots * 2 * sizeof(Slot));
+		if(newSlots)
+		{
+            Slot* oldSlots = m_Slots[0];
+            m_Slots[0] = newSlots;
+            const unsigned oldNumSlots = m_NumSlots;
+            m_NumSlots *= 2;
+
+            for(int i = 0; i < (int)oldNumSlots; ++i)
+            {
+                HbDictItem* item = oldSlots[i].m_Item;
+                while(item)
+                {
+                    HbDictItem* next = item->m_Next;
+                    item->m_Next = NULL;
+
+                    bool replaced;
+                    this->Set(item, &replaced);
+                    assert(!replaced);
+
+                    item = next;
+                }
+            }
+
+            HbHeap::Free(oldSlots);
+		}
+    }
+
+    bool replaced;
+    this->Set(newItem, &replaced);
+
+    if(!replaced)
+    {
         ++m_Count;
     }
-    else
+}
+
+bool
+HbDict::Merge(HbDictItem* mergeItem, const size_t mergeOffset)
+{
+    if(hbVerify(HB_ITEMTYPE_STRING == mergeItem->m_ValType))
     {
-        HbDictItem::Destroy(*item);
+	    Slot* slot;
+        HbDictItem** pOldItem;
+
+	    switch(mergeItem->m_KeyType)
+	    {
+	    case HB_ITEMTYPE_STRING:
+            {
+                const byte* keyData;
+                const size_t keyLen = mergeItem->m_Key.m_String->GetData(&keyData);
+		        pOldItem = Find(keyData, keyLen, &slot);
+            }
+		    break;
+	    case HB_ITEMTYPE_INT:
+		    pOldItem = Find(mergeItem->m_Key.m_Int, &slot);
+		    break;
+        default:
+            pOldItem = NULL;
+            slot = NULL;
+            break;
+	    }
+
+        if(*pOldItem)
+	    {
+            if(hbVerify(HB_ITEMTYPE_STRING == (*pOldItem)->m_ValType))
+            {
+                byte* oldData;
+                const byte* mergeData;
+                const size_t oldLen = (*pOldItem)->m_Value.m_String->GetData(&oldData);
+                const size_t mergeLen = mergeItem->m_Value.m_String->GetData(&mergeData);
+                if(mergeOffset + mergeLen <= oldLen)
+                {
+                    memcpy(&oldData[mergeOffset], mergeData, mergeLen);
+                }
+                else
+                {
+                    const size_t newLen = mergeOffset + mergeLen;
+                    HbString* newStr = HbString::Create(newLen);
+                    if(newStr)
+                    {
+                        byte* newData;
+                        newStr->GetData(&newData);
+                        if(mergeOffset < oldLen)
+                        {
+                            memcpy(newData, oldData, mergeOffset);
+                        }
+                        else
+                        {
+                            memcpy(newData, oldData, oldLen);
+                        }
+
+                        memcpy(&newData[mergeOffset], mergeData, mergeLen);
+
+                        HbString::Destroy((*pOldItem)->m_Value.m_String);
+                        (*pOldItem)->m_Value.m_String = newStr;
+                    }
+                }
+
+                return true;
+            }
+	    }
+        else
+        {
+            HbDictItem* newItem;
+            const byte* mergeData;
+            const size_t mergeLen = mergeItem->m_Value.m_String->GetData(&mergeData);
+            const size_t newLen = mergeOffset + mergeLen;
+
+	        switch(mergeItem->m_KeyType)
+	        {
+	        case HB_ITEMTYPE_STRING:
+                {
+                    const byte* keyData;
+                    const size_t keyLen = mergeItem->m_Key.m_String->GetData(&keyData);
+		            newItem = HbDictItem::Create(keyData, keyLen, NULL,  newLen);
+                }
+		        break;
+	        case HB_ITEMTYPE_INT:
+		        newItem = HbDictItem::Create(mergeItem->m_Key.m_Int, NULL,  newLen);
+		        break;
+            default:
+                newItem = NULL;
+                break;
+	        }
+
+            if(newItem)
+            {
+                byte* newData;
+                newItem->m_Value.m_String->GetData(&newData);
+                memcpy(&newData[mergeOffset], mergeData, mergeLen);
+                Set(newItem);
+                return true;
+            }
+        }
     }
 
-    *item = newItem;
+    return false;
 }
 
-void
-HbDict::Set(const byte* key, const size_t keylen,
-            const byte* value, const size_t vallen)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, keylen, value, vallen);
-    Set(newItem);
-}
-
-void
-HbDict::Set(const byte* key, const size_t keylen, const s64 value)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, keylen, value);
-    Set(newItem);
-}
-
-void
-HbDict::Set(const byte* key, const size_t keylen, const double value)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, keylen, value);
-    Set(newItem);
-}
-
-HbDict*
-HbDict::SetDict(const byte* key, const size_t keylen)
-{
-    HbDictItem* newItem = HbDictItem::CreateDict(key, keylen);
-    Set(newItem);
-    return newItem->m_Value.m_Dict;
-}
-
-void
-HbDict::Set(const s64 key, const byte* value, const size_t vallen)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, value, vallen);
-    Set(newItem);
-}
-
-void
-HbDict::Set(const s64 key, const s64 value)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, value);
-    Set(newItem);
-}
-
-void
-HbDict::Set(const s64 key, const double value)
-{
-    HbDictItem* newItem = HbDictItem::Create(key, value);
-    Set(newItem);
-}
-
-HbDict*
-HbDict::SetDict(const s64 key)
-{
-    HbDictItem* newItem = HbDictItem::CreateDict(key);
-    Set(newItem);
-    return newItem->m_Value.m_Dict;
-}
-
-void
+bool
 HbDict::Clear(const byte* key, const size_t keylen)
 {
 	Slot* slot;
-    HbDictItem** item = FindItem(key, keylen, &slot);
+    HbDictItem** item = Find(key, keylen, &slot);
     if(*item)
 	{
 		HbDictItem* next = (*item)->m_Next;
@@ -458,25 +533,33 @@ HbDict::Clear(const byte* key, const size_t keylen)
 		assert(slot->m_Count >= 0);
 		--m_Count;
 		assert(m_Count >= 0);
+
+        return true;
 	}
+
+    return false;
 }
 
-void
+bool
 HbDict::Clear(const s64 key)
 {
 	Slot* slot;
-    HbDictItem** item = FindItem(key, &slot);
+    HbDictItem** item = Find(key, &slot);
     if(*item)
 	{
 		HbDictItem* next = (*item)->m_Next;
-        HbDictItem::Destroy(*item);
+        //HbDictItem::Destroy(*item);
 		*item = next;
 
 		--slot->m_Count;
 		assert(slot->m_Count >= 0);
 		--m_Count;
 		assert(m_Count >= 0);
+
+        return true;
 	}
+
+    return false;
 }
 
 s64
@@ -494,70 +577,124 @@ HbDict::HashString(const byte* string, const size_t stringLen) const
 }
 
 HbDictItem**
-HbDict::FindItem(const byte* key, const size_t keylen, Slot** slot)
+HbDict::Find(const byte* key, const size_t keylen, Slot** slot)
 {
 	HbDictItem** item = NULL;
-	HbDict* dict = this;
-	while(dict)
-	{
-		const unsigned idx = dict->HashString(key, keylen) & (dict->m_NumSlots-1);
-		*slot = &dict->m_Slots[idx];
-		item = &(*slot)->m_Item;
-		if(*item && (*item)->m_ValType == HB_ITEMTYPE_DICT)
-		{
-			dict = (*item)->m_Value.m_Dict;
-		}
-		else
-		{
-			dict = NULL;
-		}
-	}
+    const u32 hash = HashString(key, keylen);
+    for(int i = 0; i < 2 && m_Slots[i]; ++i)
+    {
+	    const unsigned idx = hash & (m_NumSlots-1);
+	    *slot = &m_Slots[i][idx];
+	    item = &(*slot)->m_Item;
 
-	for(; *item; item = &(*item)->m_Next)
-	{
-		if((*item)->m_Key.m_String->EQ(key, keylen))
-		{
-			return item;
-		}
-	}
+	    for(; *item; item = &(*item)->m_Next)
+	    {
+		    if((*item)->m_Key.m_String->EQ(key, keylen))
+		    {
+			    return item;
+		    }
+	    }
+    }
 
     return item;
 }
 
 HbDictItem**
-HbDict::FindItem(const s64 key, Slot** slot)
+HbDict::Find(const s64 key, Slot** slot)
 {
 	HbDictItem** item = NULL;
-	HbDict* dict = this;
-	while(dict)
-	{
-		const unsigned idx = key & (dict->m_NumSlots-1);
-		*slot = &dict->m_Slots[idx];
-		item = &(*slot)->m_Item;
-		if(*item && (*item)->m_ValType == HB_ITEMTYPE_DICT)
-		{
-			dict = (*item)->m_Value.m_Dict;
-		}
-		else
-		{
-			dict = NULL;
-		}
-	}
+    const u32 hash = HashString((const byte*)&key, sizeof(key));
+    for(int i = 0; i < 2 && m_Slots[i]; ++i)
+    {
+	    const unsigned idx = hash & (m_NumSlots-1);
+	    *slot = &m_Slots[i][idx];
+	    item = &(*slot)->m_Item;
 
-	for(; *item; item = &(*item)->m_Next)
-	{
-		if(key == (*item)->m_Key.m_Int)
-		{
-			return item;
-		}
-	}
+	    for(; *item; item = &(*item)->m_Next)
+	    {
+		    if((*item)->m_Key.m_Int == key)
+		    {
+			    return item;
+		    }
+	    }
+    }
 
     return item;
+}
+
+HbDictItem**
+HbDict::Find(const HbString* key, Slot** slot)
+{
+	HbDictItem** item = NULL;
+    const byte* keyData;
+    const size_t keylen = key->GetData(&keyData);
+    const u32 hash = HashString(keyData, keylen);
+    for(int i = 0; i < 2 && m_Slots[i]; ++i)
+    {
+	    const unsigned idx = hash & (m_NumSlots-1);
+	    *slot = &m_Slots[i][idx];
+	    item = &(*slot)->m_Item;
+
+	    for(; *item; item = &(*item)->m_Next)
+	    {
+		    if((*item)->m_Key.m_String->EQ(keyData, keylen))
+		    {
+			    return item;
+		    }
+	    }
+    }
+
+    return item;
+}
+
+void
+HbDict::Set(HbDictItem* newItem, bool* replaced)
+{
+	Slot* slot;
+    HbDictItem** pitem;
+
+	switch(newItem->m_KeyType)
+	{
+	case HB_ITEMTYPE_STRING:
+        {
+            const byte* data;
+            const size_t keylen = newItem->m_Key.m_String->GetData(&data);
+		    pitem = Find(data, keylen, &slot);
+        }
+		break;
+	case HB_ITEMTYPE_INT:
+		pitem = Find(newItem->m_Key.m_Int, &slot);
+		break;
+    default:
+        pitem = NULL;
+        slot = NULL;
+        break;
+	}
+
+    assert(pitem);
+
+    if(!*pitem)
+    {
+		++slot->m_Count;
+        *replaced = false;
+    }
+    else
+    {
+        HbDictItem::Destroy(*pitem);
+        *replaced = true;
+    }
+
+    *pitem = newItem;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 //  HbDictTest
 ///////////////////////////////////////////////////////////////////////////////
+static ptrdiff_t myrandom (ptrdiff_t i)
+{
+    return HbRand()%i;
+}
+
 #if !HB_ASSERT
 void
 HbDictTest::TestStringString(const int /*numKeys*/)
@@ -574,8 +711,8 @@ HbDictTest::TestStringString(const int numKeys)
     {
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
-
-        dict->Set((byte*)key, keylen, (byte*)key, keylen);
+        HbDictItem* item = HbDictItem::Create((byte*)key, keylen, (byte*)key, keylen);
+        dict->Set(item);
     }
 
     for(int i = 0; i < numKeys; ++i)
@@ -583,7 +720,7 @@ HbDictTest::TestStringString(const int numKeys)
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
+        HbDictItem** pitem = dict->Find((byte*)key, keylen);
 		assert(*pitem);
 		assert((*pitem)->m_Value.m_String->EQ((byte*)key, keylen));
     }
@@ -593,10 +730,10 @@ HbDictTest::TestStringString(const int numKeys)
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
+        HbDictItem** pitem = dict->Find((byte*)key, keylen);
 		assert(*pitem);
 		dict->Clear((byte*)key, keylen);
-        pitem = dict->FindItem((byte*)key, keylen);
+        pitem = dict->Find((byte*)key, keylen);
 		assert(!*pitem);
     }
 
@@ -622,8 +759,8 @@ HbDictTest::TestStringInt(const int numKeys)
     {
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
-
-        dict->Set((byte*)key, keylen, (s64)i);
+        HbDictItem* item = HbDictItem::Create((byte*)key, keylen, (s64)i);
+        dict->Set(item);
     }
 
     for(int i = 0; i < numKeys; ++i)
@@ -631,7 +768,7 @@ HbDictTest::TestStringInt(const int numKeys)
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
+        HbDictItem** pitem = dict->Find((byte*)key, keylen);
 		assert(*pitem);
 		assert(i == (*pitem)->m_Value.m_Int);
     }
@@ -641,10 +778,10 @@ HbDictTest::TestStringInt(const int numKeys)
         sprintf(key, "foo%d", i);
         const size_t keylen = strlen(key);
 
-        HbDictItem** pitem = dict->FindItem((byte*)key, keylen);
+        HbDictItem** pitem = dict->Find((byte*)key, keylen);
 		assert(*pitem);
 		dict->Clear((byte*)key, keylen);
-        pitem = dict->FindItem((byte*)key, keylen);
+        pitem = dict->Find((byte*)key, keylen);
 		assert(!*pitem);
     }
 
@@ -667,22 +804,23 @@ HbDictTest::TestIntInt(const int numKeys)
 
     for(int i = 0; i < numKeys; ++i)
     {
-        dict->Set((s64)i, (s64)i);
+        HbDictItem* item = HbDictItem::Create((s64)i, (s64)i);
+        dict->Set(item);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
-        HbDictItem** pitem = dict->FindItem((s64)i);
+        HbDictItem** pitem = dict->Find((s64)i);
 		assert(*pitem);
         assert(i == (*pitem)->m_Value.m_Int);
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
-        HbDictItem** pitem = dict->FindItem((s64)i);
+        HbDictItem** pitem = dict->Find((s64)i);
 		assert(*pitem);
 		dict->Clear((s64)i);
-        pitem = dict->FindItem((s64)i);
+        pitem = dict->Find((s64)i);
 		assert(!*pitem);
     }
 
@@ -708,8 +846,8 @@ HbDictTest::TestIntString(const int numKeys)
     {
         sprintf(value, "foo%d", i);
         const size_t vallen = strlen(value);
-
-        dict->Set((s64)i, (byte*)value, vallen);
+        HbDictItem* item = HbDictItem::Create((s64)i, (byte*)value, vallen);
+        dict->Set(item);
     }
 
     for(int i = 0; i < numKeys; ++i)
@@ -717,17 +855,17 @@ HbDictTest::TestIntString(const int numKeys)
         sprintf(value, "foo%d", i);
         const size_t vallen = strlen(value);
 
-        HbDictItem** pitem = dict->FindItem((s64)i);
+        HbDictItem** pitem = dict->Find((s64)i);
 		assert(*pitem);
 		assert((*pitem)->m_Value.m_String->EQ((byte*)value, vallen));
     }
 
     for(int i = 0; i < numKeys; ++i)
     {
-        HbDictItem** pitem = dict->FindItem((s64)i);
+        HbDictItem** pitem = dict->Find((s64)i);
 		assert(*pitem);
 		dict->Clear((s64)i);
-        pitem = dict->FindItem((s64)i);
+        pitem = dict->Find((s64)i);
 		assert(!*pitem);
     }
 
@@ -736,3 +874,220 @@ HbDictTest::TestIntString(const int numKeys)
     HbDict::Destroy(dict);
 }
 #endif
+#if !HB_ASSERT
+void
+HbDictTest::TestMerge(const int /*numKeys*/)
+{
+}
+#else
+
+struct KV_int_string
+{
+    int m_Key;
+    unsigned m_ValLen;
+    char m_Value[256];
+};
+void
+HbDictTest::TestMergeIntKeys(const int numKeys)
+{
+    static const char alphabet[] =
+    {
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+        "abcdefghijklmnopqrstuvwxyz"
+    };
+
+    HbDict* dict = HbDict::Create();
+    KV_int_string* kv = new KV_int_string[numKeys];
+    for(int i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Key = i;
+        kv[i].m_ValLen = HbRand(1, sizeof(kv[i].m_Value));
+        const unsigned abOffset = HbRand() % (sizeof(alphabet) - kv[i].m_ValLen);
+        memcpy(kv[i].m_Value, &alphabet[abOffset], kv[i].m_ValLen);
+    }
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        HbDictItem* item = HbDictItem::Create(kv[i].m_Key, (byte*)kv[i].m_Value, kv[i].m_ValLen);
+        assert(dict->Merge(item, 0));
+    }
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        HbDictItem** pitem = dict->Find(kv[i].m_Key);
+		assert(*pitem);
+		assert((*pitem)->m_Value.m_String->EQ((byte*)kv[i].m_Value, kv[i].m_ValLen));
+    }
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        const unsigned offset = HbRand() % kv[i].m_ValLen;
+        const unsigned len = HbRand(1, (sizeof(kv[i].m_Value) - offset));
+        const unsigned newLen = offset+len;
+        if(newLen > kv[i].m_ValLen)
+        {
+            kv[i].m_ValLen = newLen;
+        }
+        const unsigned abOffset = HbRand() % (sizeof(alphabet) - len);
+        memcpy(&kv[i].m_Value[offset], &alphabet[abOffset], len);
+
+        HbDictItem* mergeItem = HbDictItem::Create(kv[i].m_Key, (byte*)&alphabet[abOffset], len);
+        assert(dict->Merge(mergeItem, offset));
+        HbDictItem::Destroy(mergeItem);
+
+        HbDictItem** pitem = dict->Find(kv[i].m_Key);
+		assert(*pitem);
+		assert((*pitem)->m_Value.m_String->EQ((byte*)kv[i].m_Value, kv[i].m_ValLen));
+    }
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        dict->Clear(kv[i].m_Key);
+        HbDictItem** pitem = dict->Find(kv[i].m_Key);
+		assert(!*pitem);
+    }
+
+    assert(0 == dict->Count());
+
+    HbDict::Destroy(dict);
+
+    delete [] kv;
+}
+#endif
+
+void
+HbDictTest::CreateRandomKeys(KV* kv, const int numKeys)
+{
+    for(int i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Key = i;
+    }
+    std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
+}
+
+void
+HbDictTest::AddRandomKeys(const int numKeys)
+{
+    HbDict* dict = HbDict::Create();
+    s64 value;
+
+    HbStopWatch sw;
+
+    KV* kv = new KV[numKeys];
+    CreateRandomKeys(kv, numKeys);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Value = i;
+        HbDictItem* item = HbDictItem::Create(kv[i].m_Key, (s64)kv[i].m_Value);
+        if(hbVerify(item))
+        {
+            dict->Set(item);
+            HB_ASSERTONLY(bool found =)
+                dict->Find(kv[i].m_Key, &value);
+            assert(found);
+            assert(value == kv[i].m_Value);
+        }
+    }
+    sw.Stop();
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        assert(dict->Find(kv[i].m_Key, &value));
+        assert(value == kv[i].m_Value);
+    }
+    sw.Stop();
+
+    /*std::sort(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        assert(dict->Find(kv[i].m_Key, &value));
+        assert(value == kv[i].m_Value);
+    }
+    sw.Stop();*/
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbVerify(dict->Clear(kv[i].m_Key));
+    }
+    sw.Stop();
+
+    HbDict::Destroy(dict);
+    delete [] kv;
+}
+void
+HbDictTest::AddDeleteRandomKeys(const int numKeys)
+{
+    HbDict* dict = HbDict::Create();
+    HB_ASSERTONLY(s64 value);
+
+    KV* kv = new KV[numKeys];
+    CreateRandomKeys(kv, numKeys);
+    for(int i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Value = i;
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        int idx = HbRand() % numKeys;
+        if(!kv[idx].m_Added)
+        {
+            HbDictItem* item = HbDictItem::Create(kv[i].m_Key, (s64)kv[i].m_Value);
+            if(hbVerify(item))
+            {
+                dict->Set(item);
+                kv[idx].m_Added = true;
+                assert(dict->Find(kv[idx].m_Key, &value));
+                assert(value == kv[idx].m_Value);
+            }
+        }
+        else
+        {
+            hbVerify(dict->Clear(kv[idx].m_Key));
+            kv[idx].m_Added = false;
+            assert(!dict->Find(kv[idx].m_Key, &value));
+        }
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        if(kv[i].m_Added)
+        {
+            assert(dict->Find(kv[i].m_Key, &value));
+            assert(value == kv[i].m_Value);
+        }
+        else
+        {
+            assert(!dict->Find(kv[i].m_Key, &value));
+        }
+    }
+
+    HbDict::Destroy(dict);
+    delete [] kv;
+}
+
+

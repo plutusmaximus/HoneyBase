@@ -15,7 +15,6 @@ union HbDictValue
 
 class HbDictItem
 {
-    friend class HbHeap;
 public:
 
     static HbDictItem* Create(const byte* key, const size_t keylen,
@@ -55,22 +54,18 @@ public:
     static HbDict* Create();
     static void Destroy(HbDict* dict);
 
-    HbDictItem** FindItem(const byte* key, const size_t keylen);
-    HbDictItem** FindItem(const s64 key);
+    bool Find(const s64 key, s64* value) const;
+
+    HbDictItem** Find(const byte* key, const size_t keylen);
+    HbDictItem** Find(const s64 key);
+    HbDictItem** Find(const HbString* key);
 
     void Set(HbDictItem* item);
-    void Set(const byte* key, const size_t keylen,
-            const byte* value, const size_t vallen);
-    void Set(const byte* key, const size_t keylen, const s64 value);
-    void Set(const byte* key, const size_t keylen, const double value);
-    HbDict* SetDict(const byte* key, const size_t keylen);
-    void Set(const s64 key, const byte* value, const size_t vallen);
-    void Set(const s64 key, const s64 value);
-    void Set(const s64 key, const double value);
-    HbDict* SetDict(const s64 key);
 
-	void Clear(const byte* key, const size_t keylen);
-	void Clear(const s64 key);
+    bool Merge(HbDictItem* mergeItem, const size_t mergeOffset);
+
+	bool Clear(const byte* key, const size_t keylen);
+	bool Clear(const s64 key);
 
     s64 Count() const;
 
@@ -90,13 +85,16 @@ private:
 	};
 
 	u32 HashString(const byte* string, const size_t stringLen) const;
+    
+    HbDictItem** Find(const byte* key, const size_t keylen, Slot** slot);
+    HbDictItem** Find(const s64 key, Slot** slot);
+    HbDictItem** Find(const HbString* key, Slot** slot);
 
-    HbDictItem** FindItem(const byte* key, const size_t keylen, Slot** slot);
-    HbDictItem** FindItem(const s64 key, Slot** slot);
+    void Set(HbDictItem* item, bool* replaced);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
-    Slot* m_Slots;
+    Slot* m_Slots[2];
 
     s64 m_Count;
     int m_NumSlots;
@@ -111,10 +109,35 @@ private:
 class HbDictTest
 {
 public:
+    struct KV
+    {
+        int m_Key;
+        int m_Value;
+        bool m_Added : 1;
+
+        KV()
+        : m_Added(false)
+        {
+        }
+
+        bool operator<(const KV& a) const
+        {
+            return m_Key < a.m_Key;
+        }
+    };
+
     static void TestStringString(const int numKeys);
     static void TestStringInt(const int numKeys);
     static void TestIntInt(const int numKeys);
     static void TestIntString(const int numKeys);
+
+    static void TestMergeIntKeys(const int numKeys);
+
+    static void CreateRandomKeys(KV* kv, const int numKeys);
+
+    static void AddRandomKeys(const int numKeys);
+
+    static void AddDeleteRandomKeys(const int numKeys);
 };
 
 #endif  //__HB_DICT_H__

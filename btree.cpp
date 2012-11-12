@@ -1174,27 +1174,12 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
         assert(index.Find(kv[i].m_Key, &value));
         if(unique)
         {
-             assert(value == kv[i].m_Value);
+            assert(value == kv[i].m_Value);
         }
         //index.Validate();
     }
 
-    //index.DumpStats();
-
-    index.Validate();
-
-    //index.Dump(true);
-
-    std::sort(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        assert(index.Find(kv[i].m_Key, &value));
-        if(unique)
-        {
-             assert(value == kv[i].m_Value);
-        }
-    }
+    //index.Validate();
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
@@ -1207,13 +1192,25 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
         }
     }
 
+    /*std::sort(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        assert(index.Find(kv[i].m_Key, &value));
+        if(unique)
+        {
+            assert(value == kv[i].m_Value);
+        }
+    }*/
+
     for(int i = 0; i < numKeys; ++i)
     {
         hbVerify(index.Delete(kv[i].m_Key));
         //index.Validate();
     }
 
-    index.Validate();
+    //index.Validate();
+    delete [] kv;
 }
 
 void
@@ -1240,7 +1237,7 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
             assert(index.Find(kv[idx].m_Key, &value));
             if(unique)
             {
-                 assert(value == kv[idx].m_Value);
+                assert(value == kv[idx].m_Value);
             }
         }
         else
@@ -1261,7 +1258,7 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
             assert(index.Find(kv[i].m_Key, &value));
             if(unique)
             {
-                 assert(value == kv[i].m_Value);
+                assert(value == kv[i].m_Value);
             }
         }
         else

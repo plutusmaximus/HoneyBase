@@ -39,13 +39,14 @@ typedef u8          byte;
 #define HB_ASSERTONLY(a)
 #endif
 
-#define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
+#define HB_ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
 
 #define STATIC_ASSERT(cond) typedef char static_assertion_##__LINE__[(cond)?1:-1]
 
 #define hbVerify(cond) ((cond) || (__debugbreak(),false))
 
 unsigned HbRand();
+unsigned HbRand(const unsigned min, const unsigned max);
 
 enum HbItemType
 {
@@ -57,27 +58,48 @@ enum HbItemType
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+//  HbLog
+///////////////////////////////////////////////////////////////////////////////
+class HbLog
+{
+public:
+
+    HbLog();
+    explicit HbLog(const char* channel);
+
+    void Debug(const char* fmt, ...);
+    void Error(const char* fmt, ...);
+
+private:
+
+    char m_Channel[64];
+};
+
+///////////////////////////////////////////////////////////////////////////////
 //  HbHeap
 ///////////////////////////////////////////////////////////////////////////////
 class HbHeap
 {
 public:
 
-	static void* Alloc(size_t size);
+	static void* ZAlloc(size_t size);
 
 	static void Free(void* mem);
 };
 
+///////////////////////////////////////////////////////////////////////////////
+//  HbString
+///////////////////////////////////////////////////////////////////////////////
 class HbString
 {
 public:
 
+    static HbString* Create(const size_t stringLen);
     static HbString* Create(const byte* string, const size_t stringLen);
     static void Destroy(HbString* hbs);
 
-    const byte* Data() const;
-
     size_t GetData(const byte** data) const;
+    size_t GetData(byte** data);
 
     size_t Length() const;
 

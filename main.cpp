@@ -11,6 +11,8 @@
 #include <windows.h>
 #endif
 
+static HbLog s_Log("main");
+
 int main(int /*argc*/, char** /*argv*/)
 {
     HbStringTest::Test();
@@ -18,27 +20,24 @@ int main(int /*argc*/, char** /*argv*/)
     HbDictTest::TestStringInt(1024);
     HbDictTest::TestIntInt(1024);
     HbDictTest::TestIntString(1024);
+    HbDictTest::TestMergeIntKeys(1024);
 
     HbStopWatch sw;
-    char buf[256];
+
+    sw.Restart();
+    HbDictTest::AddRandomKeys(1024*1024);
+    sw.Stop();
+    s_Log.Debug("DICT: %f", sw.GetElapsed());
 
     sw.Restart();
     HbSkipListTest::AddRandomKeys(1024*1024, true, 0);
     sw.Stop();
-    sprintf(buf, "SKIPLIST: %f\n", sw.GetElapsed());
-    OutputDebugString(buf);
-
-    /*sw.Restart();
-    HbSkipListTest::AddRandomKeys(1024*1024, true, 0);
-    sw.Stop();
-    sprintf(buf, "%f", sw.GetElapsed());
-    OutputDebugString(buf);*/
+    s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());
 
     sw.Restart();
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);
     sw.Stop();
-    sprintf(buf, "BTREE: %f\n", sw.GetElapsed());
-    OutputDebugString(buf);
+    s_Log.Debug("BTREEE: %f", sw.GetElapsed());
 
     //HbIndexTest::AddRandomKeys(1024, true, 32767);
     //HbIndexTest::AddRandomKeys(10, false, 1);
