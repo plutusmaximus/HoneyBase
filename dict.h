@@ -89,6 +89,7 @@ private:
     HbDictItem** Find(const byte* key, const size_t keylen, Slot** slot);
     HbDictItem** Find(const s64 key, Slot** slot);
     HbDictItem** Find(const HbString* key, Slot** slot);
+    HbDictItem** Find(const HbDictValue& key, const HbItemType keyType, Slot** slot);
 
     void Set(HbDictItem* item, bool* replaced);
 
@@ -131,7 +132,7 @@ public:
     static void TestIntInt(const int numKeys);
     static void TestIntString(const int numKeys);
 
-    static void TestMergeIntKeys(const int numKeys);
+    static void TestMergeIntKeys(const int numKeys, const int numIterations);
 
     static void CreateRandomKeys(KV* kv, const int numKeys);
 

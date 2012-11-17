@@ -20,7 +20,7 @@ int main(int /*argc*/, char** /*argv*/)
     HbDictTest::TestStringInt(1024);
     HbDictTest::TestIntInt(1024);
     HbDictTest::TestIntString(1024);
-    HbDictTest::TestMergeIntKeys(1024);
+    HbDictTest::TestMergeIntKeys(1024, 100);
 
     HbStopWatch sw;
 

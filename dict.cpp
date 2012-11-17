@@ -421,25 +421,7 @@ HbDict::Merge(HbDictItem* mergeItem, const size_t mergeOffset)
     if(hbVerify(HB_ITEMTYPE_STRING == mergeItem->m_ValType))
     {
 	    Slot* slot;
-        HbDictItem** pOldItem;
-
-	    switch(mergeItem->m_KeyType)
-	    {
-	    case HB_ITEMTYPE_STRING:
-            {
-                const byte* keyData;
-                const size_t keyLen = mergeItem->m_Key.m_String->GetData(&keyData);
-		        pOldItem = Find(keyData, keyLen, &slot);
-            }
-		    break;
-	    case HB_ITEMTYPE_INT:
-		    pOldItem = Find(mergeItem->m_Key.m_Int, &slot);
-		    break;
-        default:
-            pOldItem = NULL;
-            slot = NULL;
-            break;
-	    }
+        HbDictItem** pOldItem = Find(mergeItem->m_Key, mergeItem->m_KeyType, &slot);
 
         if(*pOldItem)
 	    {
@@ -451,10 +433,17 @@ HbDict::Merge(HbDictItem* mergeItem, const size_t mergeOffset)
                 const size_t mergeLen = mergeItem->m_Value.m_String->GetData(&mergeData);
                 if(mergeOffset + mergeLen <= oldLen)
                 {
-                    memcpy(&oldData[mergeOffset], mergeData, mergeLen);
+                    //New data will be merged within the bounds of
+                    //the old data.
+
+                    //Use memmove because mergeItem and oldItem could be
+                    //the same item.
+                    memmove(&oldData[mergeOffset], mergeData, mergeLen);
                 }
                 else
                 {
+                    //New data extends past the end of the old data.
+
                     const size_t newLen = mergeOffset + mergeLen;
                     HbString* newStr = HbString::Create(newLen);
                     if(newStr)
@@ -482,6 +471,8 @@ HbDict::Merge(HbDictItem* mergeItem, const size_t mergeOffset)
 	    }
         else
         {
+            //Item doesn't exist yet, create it.
+
             HbDictItem* newItem;
             const byte* mergeData;
             const size_t mergeLen = mergeItem->m_Value.m_String->GetData(&mergeData);
@@ -645,6 +636,23 @@ HbDict::Find(const HbString* key, Slot** slot)
     }
 
     return item;
+}
+
+HbDictItem**
+HbDict::Find(const HbDictValue& key, const HbItemType keyType, Slot** slot)
+{
+	switch(keyType)
+	{
+	case HB_ITEMTYPE_STRING:
+        return Find(key.m_String, slot);
+	case HB_ITEMTYPE_INT:
+		return Find(key.m_Int, slot);
+    default:
+        slot = NULL;
+        break;
+	}
+
+    return NULL;
 }
 
 void
@@ -883,12 +891,13 @@ HbDictTest::TestMerge(const int /*numKeys*/)
 
 struct KV_int_string
 {
+    static const int SECTION_LEN    = 256;
     int m_Key;
-    unsigned m_ValLen;
-    char m_Value[256];
+    unsigned m_FinalLen;
+    char m_Test[SECTION_LEN*3];
 };
 void
-HbDictTest::TestMergeIntKeys(const int numKeys)
+HbDictTest::TestMergeIntKeys(const int numKeys, const int numIterations)
 {
     static const char alphabet[] =
     {
@@ -905,61 +914,61 @@ HbDictTest::TestMergeIntKeys(const int numKeys)
     };
 
     HbDict* dict = HbDict::Create();
+
+    //Create random length strings, with random offsets
     KV_int_string* kv = new KV_int_string[numKeys];
-    for(int i = 0; i < numKeys; ++i)
+    memset(kv, 0, numKeys*sizeof(*kv));
+
+    KV_int_string* p = kv;
+    for(int i = 0; i < numKeys; ++i, ++p)
     {
-        kv[i].m_Key = i;
-        kv[i].m_ValLen = HbRand(1, sizeof(kv[i].m_Value));
-        const unsigned abOffset = HbRand() % (sizeof(alphabet) - kv[i].m_ValLen);
-        memcpy(kv[i].m_Value, &alphabet[abOffset], kv[i].m_ValLen);
+        p->m_Key = i;
     }
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
-    for(int i = 0; i < numKeys; ++i)
+    for(int iter = 0; iter < numIterations; ++iter)
     {
-        HbDictItem* item = HbDictItem::Create(kv[i].m_Key, (byte*)kv[i].m_Value, kv[i].m_ValLen);
-        assert(dict->Merge(item, 0));
-    }
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        HbDictItem** pitem = dict->Find(kv[i].m_Key);
-		assert(*pitem);
-		assert((*pitem)->m_Value.m_String->EQ((byte*)kv[i].m_Value, kv[i].m_ValLen));
-    }
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        const unsigned offset = HbRand() % kv[i].m_ValLen;
-        const unsigned len = HbRand(1, (sizeof(kv[i].m_Value) - offset));
-        const unsigned newLen = offset+len;
-        if(newLen > kv[i].m_ValLen)
+        p = kv;
+        for(int i = 0; i < numKeys; ++i, ++p)
         {
-            kv[i].m_ValLen = newLen;
+            const unsigned offset = HbRand(0, KV_int_string::SECTION_LEN-1);
+            const unsigned len = HbRand(1, KV_int_string::SECTION_LEN);
+            if(offset+len > p->m_FinalLen)
+            {
+                p->m_FinalLen = offset + len;
+            }
+
+            const unsigned abOffset = HbRand() % (sizeof(alphabet) - len);
+
+            HbDictItem* item = HbDictItem::Create(p->m_Key, (byte*)&alphabet[abOffset], len);
+            assert(dict->Merge(item, offset));
+            HbDictItem::Destroy(item);
+
+            memcpy(&p->m_Test[offset], &alphabet[abOffset], len);
         }
-        const unsigned abOffset = HbRand() % (sizeof(alphabet) - len);
-        memcpy(&kv[i].m_Value[offset], &alphabet[abOffset], len);
 
-        HbDictItem* mergeItem = HbDictItem::Create(kv[i].m_Key, (byte*)&alphabet[abOffset], len);
-        assert(dict->Merge(mergeItem, offset));
-        HbDictItem::Destroy(mergeItem);
+        std::random_shuffle(&kv[0], &kv[numKeys]);
 
-        HbDictItem** pitem = dict->Find(kv[i].m_Key);
-		assert(*pitem);
-		assert((*pitem)->m_Value.m_String->EQ((byte*)kv[i].m_Value, kv[i].m_ValLen));
+        //Check they've been added
+        p = kv;
+        for(int i = 0; i < numKeys; ++i, ++p)
+        {
+            HbDictItem** pitem = dict->Find(p->m_Key);
+		    assert(*pitem);
+            const byte* data;
+            const size_t len = (*pitem)->m_Value.m_String->GetData(&data);
+            assert(len == p->m_FinalLen);
+            assert(0 == memcmp(data, p->m_Test, p->m_FinalLen));
+        }
     }
 
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
+    //Delete the items
+    p = kv;
+    for(int i = 0; i < numKeys; ++i, ++p)
     {
-        dict->Clear(kv[i].m_Key);
-        HbDictItem** pitem = dict->Find(kv[i].m_Key);
+        dict->Clear(p->m_Key);
+        HbDictItem** pitem = dict->Find(p->m_Key);
 		assert(!*pitem);
     }
 
