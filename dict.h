@@ -3,37 +3,27 @@
 
 #include "hb.h"
 
-class HbDict;
-
-union HbDictValue
-{
-    s64 m_Int;
-    double m_Double;
-    HbString* m_String;
-    HbDict* m_Dict;
-};
-
 class HbDictItem
 {
-public:
+    friend class HbDict;
+private:
 
-    static HbDictItem* Create(const byte* key, const size_t keylen,
-                                const byte* value, const size_t vallen);
-    static HbDictItem* Create(const byte* key, const size_t keylen, const s64 value);
-    static HbDictItem* Create(const byte* key, const size_t keylen, const double value);
-    static HbDictItem* CreateDict(const byte* key, const size_t keylen);
-    static HbDictItem* Create(const s64 key, const byte* value, const size_t vallen);
+    static HbDictItem* Create(const HbString* key, const HbString* value);
+    static HbDictItem* Create(const HbString* key, const s64 value);
+    static HbDictItem* Create(const HbString* key, const double value);
+    static HbDictItem* Create(const s64 key, const HbString* value);
     static HbDictItem* Create(const s64 key, const s64 value);
     static HbDictItem* Create(const s64 key, const double value);
-    static HbDictItem* CreateDict(const s64 key);
+    static HbDictItem* CreateEmpty(const HbString* key, const size_t len);
+    static HbDictItem* CreateEmpty(const s64 key, const size_t len);
     static void Destroy(HbDictItem* item);
 
-    HbDictValue m_Key;
-    HbDictValue m_Value;
+    HbValue m_Key;
+    HbValue m_Value;
     HbDictItem* m_Next;
 
-    HbItemType m_KeyType : 4;
-    HbItemType m_ValType : 4;
+    HbValueType m_KeyType : 4;
+    HbValueType m_ValType : 4;
 
 private:
 
@@ -47,27 +37,28 @@ private:
 
 class HbDict
 {
-	friend class HbDictItem;
-
 public:
 
     static HbDict* Create();
     static void Destroy(HbDict* dict);
 
+    bool Set(const HbString* key, const HbString* value);
+    bool Set(const HbString* key, const s64 value);
+    bool Set(const s64 key, const HbString* value);
+    bool Set(const s64 key, const s64 value);
+
+	bool Clear(const s64 key);
+	bool Clear(const HbString* key);
+
+    bool Find(const HbString* key, const HbString** value) const;
+    bool Find(const HbString* key, s64* value) const;
+    bool Find(const s64 key, const HbString** value) const;
     bool Find(const s64 key, s64* value) const;
 
-    HbDictItem** Find(const byte* key, const size_t keylen);
-    HbDictItem** Find(const s64 key);
-    HbDictItem** Find(const HbString* key);
+    bool Merge(const HbString* key, const HbString* value, const size_t mergeOffset);
+    bool Merge(const s64 key, const HbString* value, const size_t mergeOffset);
 
-    void Set(HbDictItem* item);
-
-    bool Merge(HbDictItem* mergeItem, const size_t mergeOffset);
-
-	bool Clear(const byte* key, const size_t keylen);
-	bool Clear(const s64 key);
-
-    s64 Count() const;
+    size_t Count() const;
 
 private:
 
@@ -85,20 +76,19 @@ private:
 	};
 
 	u32 HashString(const byte* string, const size_t stringLen) const;
-    
-    HbDictItem** Find(const byte* key, const size_t keylen, Slot** slot);
-    HbDictItem** Find(const s64 key, Slot** slot);
-    HbDictItem** Find(const HbString* key, Slot** slot);
-    HbDictItem** Find(const HbDictValue& key, const HbItemType keyType, Slot** slot);
 
+    void Set(HbDictItem* item);
     void Set(HbDictItem* item, bool* replaced);
+    
+    HbDictItem** Find(const HbString* key, Slot** slot);
+    HbDictItem** Find(const s64 key, Slot** slot);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
     Slot* m_Slots[2];
 
-    s64 m_Count;
-    int m_NumSlots;
+    size_t m_Count;
+    size_t m_NumSlots;
 	u32 m_HashSalt;
 
     HbDict();

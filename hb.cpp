@@ -2,7 +2,6 @@
 
 #include "hb.h"
 
-#include <assert.h>
 #include <malloc.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -91,35 +90,31 @@ HbHeap::Free(void* mem)
 HbString*
 HbString::Create(const size_t stringLen)
 {
+    return Create(NULL, stringLen);
+}
+
+HbString*
+HbString::Create(const byte* string, const size_t stringLen)
+{
     const size_t size = Size(stringLen);
     HbString* hbs = (HbString*) HbHeap::ZAlloc(size);
     if(hbs)
     {
-        byte* bytes = (byte*) hbs;
-
-        int offset = 0;
-        size_t tmpLen = stringLen;
-        while(tmpLen > 0x7F)
-        {
-            bytes[offset++] = 0x80 | (tmpLen & 0x7F);
-            tmpLen >>= 7;
-        }
-
-        bytes[offset++] = tmpLen & 0x7F;
+        Init(hbs, string, stringLen);
     }
 
     return hbs;
 }
 
 HbString*
-HbString::Create(const byte* string, const size_t stringLen)
+HbString::Dup(const HbString* string)
 {
-    HbString* hbs = Create(stringLen);
-    if(hbs && string)
+    HbString* hbs = (HbString*) HbHeap::ZAlloc(string->Size());
+    if(hbs)
     {
-        byte* data;
-        hbs->GetData(&data);
-        memcpy(data, string, stringLen);
+        const byte* data;
+        const size_t len = string->GetData(&data);
+        Init(hbs, data, len);
     }
 
     return hbs;
@@ -132,11 +127,25 @@ HbString::Destroy(HbString* hbs)
     HbHeap::Free(hbs);
 }
 
+HbString*
+HbString::Encode(const byte* src, const size_t srcLen,
+                byte* dst, const size_t dstSize)
+{
+    const size_t size = Size(srcLen);
+    if(hbverify(size <= dstSize))
+    {
+        Init((HbString*)dst, src, srcLen);
+        return (HbString*)dst;
+    }
+
+    return NULL;
+}
+
 size_t
-HbString::GetData(const byte** data) const
+HbString::GetData(const byte* hbs, const byte** data)
 {
     size_t len = 0;
-    const byte* p = (byte*)this;
+    const byte* p = hbs;
     int shift = 0;
 
     while(*p & 0x80)
@@ -153,19 +162,19 @@ HbString::GetData(const byte** data) const
 }
 
 size_t
-HbString::GetData(byte** data)
+HbString::GetData(byte* hbs, byte** data)
 {
     const byte* cdata;
-    const size_t len = GetData(&cdata);
+    const size_t len = GetData(hbs, &cdata);
     *data = (byte*)cdata;
     return len;
 }
 
 size_t
-HbString::Length() const
+HbString::Length(const byte* hbs)
 {
     size_t len = 0;
-    const byte* p = (byte*)this;
+    const byte* p = hbs;
     int shift = 0;
 
     while(*p & 0x80)
@@ -180,10 +189,10 @@ HbString::Length() const
 }
 
 size_t
-HbString::Size() const
+HbString::Size(const byte* hbs)
 {
     size_t len = 0;
-    const byte* p = (byte*)this;
+    const byte* p = hbs;
     int shift = 0;
 
     while(*p & 0x80)
@@ -194,7 +203,7 @@ HbString::Size() const
 
     len |= (*p & 0x7F) << shift;
 
-    return len + (p - (byte*)this + 1);
+    return len + (p - hbs + 1);
 }
 
 size_t
@@ -210,12 +219,42 @@ HbString::Size(const size_t stringLen)
     return size;
 }
 
+size_t
+HbString::GetData(const byte** data) const
+{
+    return GetData((const byte*) this, data);
+}
+
+size_t
+HbString::GetData(byte** data)
+{
+    return GetData((byte*) this, data);
+}
+
+size_t
+HbString::Length() const
+{
+    return Length((const byte*) this);
+}
+
+size_t
+HbString::Size() const
+{
+    return Size((const byte*) this);
+}
+
+HbString*
+HbString::Dup() const
+{
+    return Dup(this);
+}
+
 bool
-HbString::EQ(const HbString& that) const
+HbString::EQ(const HbString* that) const
 {
     const size_t mysize = Size();
-    return (that.Size() == mysize
-            && (0 == mysize || 0 == memcmp(this, &that, mysize)));
+    return (that->Size() == mysize
+            && (0 == mysize || 0 == memcmp(this, that, mysize)));
 }
 
 bool
@@ -227,6 +266,38 @@ HbString::EQ(const byte* string, const size_t stringLen) const
             && (0 == mylen || 0 == memcmp(data, string, mylen)));
 }
 
+//proteted:
+
+void
+HbString::Init(HbString* hbs, const byte* bytes, const size_t stringLen)
+{
+    byte* p = (byte*) hbs;
+
+    size_t tmpLen = stringLen;
+    while(tmpLen > 0x7F)
+    {
+        *p++ = 0x80 | (tmpLen & 0x7F);
+        tmpLen >>= 7;
+    }
+
+    *p++ = tmpLen & 0x7F;
+
+    if(bytes)
+    {
+        memcpy(p, bytes, stringLen);
+    }
+}
+
+/*///////////////////////////////////////////////////////////////////////////////
+//  HbFixedString32
+///////////////////////////////////////////////////////////////////////////////
+HbFixedString32::HbFixedString32(const byte* string, const size_t stringLen)
+{
+    hbassert(stringLen < 32);
+    const size_t len = (stringLen >= 32) ? 32: stringLen;
+    Init(this, string, len);
+}*/
+
 ///////////////////////////////////////////////////////////////////////////////
 //  HbStringTest
 ///////////////////////////////////////////////////////////////////////////////
@@ -236,8 +307,8 @@ HbStringTest::Test()
     HbString* hbs = HbString::Create((const byte*)"Foo", strlen("Foo"));
     const byte* data;
     size_t len = hbs->GetData(&data);
-    assert(len == 3);
-    assert(0 == memcmp("Foo", data, strlen("Foo")));
+    hbassert(len == 3);
+    hbassert(0 == memcmp("Foo", data, strlen("Foo")));
     HbString::Destroy(hbs);
 
     byte* str;
@@ -251,8 +322,8 @@ HbStringTest::Test()
 
     hbs = HbString::Create(str, len);
     hbs->GetData(&data);
-    assert(hbs->Length() == len);
-    assert(0 == memcmp(str, data, len));
+    hbassert(hbs->Length() == len);
+    hbassert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -264,9 +335,9 @@ HbStringTest::Test()
     }
 
     hbs = HbString::Create(str, len);
-    assert(hbs->Length() == len);
+    hbassert(hbs->Length() == len);
     hbs->GetData(&data);
-    assert(0 == memcmp(str, data, len));
+    hbassert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 
@@ -278,9 +349,9 @@ HbStringTest::Test()
     }
 
     hbs = HbString::Create(str, len);
-    assert(hbs->Length() == len);
+    hbassert(hbs->Length() == len);
     hbs->GetData(&data);
-    assert(0 == memcmp(str, data, len));
+    hbassert(0 == memcmp(str, data, len));
     HbString::Destroy(hbs);
     delete [] str;
 }

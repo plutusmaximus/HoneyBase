@@ -39,22 +39,42 @@ typedef u8          byte;
 #define HB_ASSERTONLY(a)
 #endif
 
-#define HB_ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
+#define hbverify(cond) ((cond) || (__debugbreak(),false))
 
-#define STATIC_ASSERT(cond) typedef char static_assertion_##__LINE__[(cond)?1:-1]
+#if HB_ASSERT
+#define hbassert(cond) (void)(hbverify(cond))
+#else
+#define hbassert(cond)
+#endif
 
-#define hbVerify(cond) ((cond) || (__debugbreak(),false))
+#define hbarraylen(a) (sizeof(a)/sizeof((a)[0]))
+
+#define hb_static_assert(cond) typedef char static_assertion_##__LINE__[(cond)?1:-1]
 
 unsigned HbRand();
 unsigned HbRand(const unsigned min, const unsigned max);
 
-enum HbItemType
+enum HbValueType
 {
-    HB_ITEMTYPE_INVALID,
-    HB_ITEMTYPE_INT,
-    HB_ITEMTYPE_DOUBLE,
-    HB_ITEMTYPE_STRING,
-    HB_ITEMTYPE_DICT
+    HB_VALUETYPE_INVALID,
+    HB_VALUETYPE_INT,
+    HB_VALUETYPE_DOUBLE,
+    HB_VALUETYPE_STRING,
+    HB_VALUETYPE_DICT,
+    HB_VALUETYPE_SKIPLIST
+};
+
+class HbString;
+class HbDict;
+class HbSkipList;
+
+union HbValue
+{
+    s64 m_Int;
+    double m_Double;
+    HbString* m_String;
+    HbDict* m_Dict;
+    HbSkipList* m_SkipList;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -96,7 +116,20 @@ public:
 
     static HbString* Create(const size_t stringLen);
     static HbString* Create(const byte* string, const size_t stringLen);
+    static HbString* Dup(const HbString* string);
     static void Destroy(HbString* hbs);
+
+    static HbString* Encode(const byte* src, const size_t srcLen,
+                            byte* dst, const size_t dstSize);
+
+    static size_t GetData(const byte* hbs, const byte** data);
+    static size_t GetData(byte* hbs, byte** data);
+
+    static size_t Length(const byte* hbs);
+
+    static size_t Size(const byte* hbs);
+
+    static size_t Size(const size_t stringLen);
 
     size_t GetData(const byte** data) const;
     size_t GetData(byte** data);
@@ -105,10 +138,14 @@ public:
 
     size_t Size() const;
 
-    static size_t Size(const size_t stringLen);
+    HbString* Dup() const;
 
-    bool EQ(const HbString& that) const;
+    bool EQ(const HbString* that) const;
     bool EQ(const byte* string, const size_t stringLen) const;
+
+protected:
+
+    static void Init(HbString* hbs, const byte* bytes, const size_t size);
 
 private:
 
@@ -116,6 +153,24 @@ private:
     ~HbString(){}
     HbString(const HbString&);
     HbString& operator=(const HbString&);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbFixedString32
+///////////////////////////////////////////////////////////////////////////////
+class HbFixedString32 : HbString
+{
+public:
+
+    explicit HbFixedString32(const byte* string, const size_t stringLen);
+
+    ~HbFixedString32();
+
+private:
+
+    HbFixedString32();
+
+    byte m_Buf[32];
 };
 
 class HbStringTest

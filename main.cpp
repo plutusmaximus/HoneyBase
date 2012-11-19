@@ -1,15 +1,7 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include "hb.h"
 #include "dict.h"
 #include "btree.h"
 #include "skiplist.h"
-
-#include <stdio.h>
-
-#ifdef _MSC_VER
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
 
 static HbLog s_Log("main");
 
@@ -38,6 +30,8 @@ int main(int /*argc*/, char** /*argv*/)
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);
     sw.Stop();
     s_Log.Debug("BTREEE: %f", sw.GetElapsed());
+
+    HbSkipListTest::AddDeleteRandomKeys(1024*1024, true, 0);
 
     //HbIndexTest::AddRandomKeys(1024, true, 32767);
     //HbIndexTest::AddRandomKeys(10, false, 1);

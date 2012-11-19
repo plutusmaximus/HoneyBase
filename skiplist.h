@@ -4,20 +4,39 @@
 #include "hb.h"
 
 class HbSkipNode;
+class HbSkipList;
 
 class HbSkipLink
 {
-public:
+    friend class HbSkipNode;
+    friend class HbSkipList;
+
     HbSkipNode* m_Node;
 };
 
 class HbSkipNode
 {
 public:
+    static HbSkipNode* Create(const s64 key, const HbString* value);
+    static HbSkipNode* Create(const s64 key, const s64 value);
+    static void Destroy(HbSkipNode* node);
+
     unsigned m_Height;
     s64 m_Key;
-    s64 m_Value;
+    HbValue m_Value;
+
+    HbValueType m_ValType : 4;
+
     HbSkipLink m_Next[1];
+
+private:
+
+    static HbSkipNode* Create();
+
+    HbSkipNode();
+    ~HbSkipNode();
+    HbSkipNode(const HbSkipNode&);
+    HbSkipNode& operator=(const HbSkipNode&);
 };
 
 class HbSkipList
@@ -25,20 +44,27 @@ class HbSkipList
 public:
     static const int MAX_HEIGHT = 32;
 
+    bool Insert(const s64 key, const HbString* value);
     bool Insert(const s64 key, const s64 value);
 
     bool Delete(const s64 key);
 
     bool Find(const s64 key, s64* value) const;
+    bool Find(const s64 key, const HbString** value) const;
 
     unsigned m_Height;
     unsigned m_Count;
     HbSkipLink m_Head[MAX_HEIGHT];
 
 private:
-    HbSkipNode* AllocNode();
 
-    void FreeNode(HbSkipNode* node);
+    bool Insert(HbSkipNode* node);
+    const HbSkipNode* Find(const s64 key) const;
+
+    HbSkipList();
+    ~HbSkipList();
+    HbSkipList(const HbSkipList&);
+    HbSkipList& operator=(const HbSkipList&);
 };
 
 class HbSkipListTest

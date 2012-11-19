@@ -1,7 +1,6 @@
 #include "btree.h"
 
 #include <algorithm>
-#include <assert.h>
 #include <string.h>
 
 #if _MSC_VER
@@ -211,7 +210,7 @@ HbIndex::Insert(const s64 key, const s64 value)
 
             //Guarantee the splitLoc will always be >= 2;
             //See comments below about numToCopy.
-            STATIC_ASSERT(HbIndexNode::NUM_KEYS >= 4);
+            hb_static_assert(HbIndexNode::NUM_KEYS >= 4);
 
             int splitLoc = HbIndexNode::NUM_KEYS / 2;
 
@@ -225,7 +224,7 @@ HbIndex::Insert(const s64 key, const s64 value)
                         splitLoc += Bound(node->m_Keys[splitLoc],
                                             &node->m_Keys[splitLoc],
                                             &node->m_Keys[HbIndexNode::NUM_KEYS]);
-                        assert(splitLoc <= HbIndexNode::NUM_KEYS);
+                        hbassert(splitLoc <= HbIndexNode::NUM_KEYS);
 
                         //If the dups extend to the end of the node it's ok to split
                         //on the last dup because the item currently being inserted
@@ -243,7 +242,7 @@ HbIndex::Insert(const s64 key, const s64 value)
                         splitLoc += Bound(node->m_Keys[splitLoc],
                                             &node->m_Keys[splitLoc],
                                             &node->m_Keys[HbIndexNode::NUM_KEYS]);
-                        assert(splitLoc <= HbIndexNode::NUM_KEYS);
+                        hbassert(splitLoc <= HbIndexNode::NUM_KEYS);
 
                         //If the dups extend to the end of the node it's ok to split
                         //on the last dup because the item currently being inserted
@@ -258,7 +257,7 @@ HbIndex::Insert(const s64 key, const s64 value)
 
             HbIndexNode* newNode = AllocNode();
             const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
-            assert(numToCopy > 0);
+            hbassert(numToCopy > 0);
 
             if(isLeaf)
             {
@@ -299,7 +298,7 @@ HbIndex::Insert(const s64 key, const s64 value)
                 ++depth;
             }
 
-            assert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
+            hbassert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
             Move(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
             Move(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
 
@@ -339,7 +338,7 @@ HbIndex::Insert(const s64 key, const s64 value)
         }
 
         keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
-        assert(keyIdx >= 0);
+        hbassert(keyIdx >= 0);
 
         if(!isLeaf)
         {
@@ -523,7 +522,7 @@ HbIndex::Delete(const s64 key)
                     }
                     else
                     {
-                        assert(parent == m_Nodes);
+                        hbassert(parent == m_Nodes);
 
                         HbIndexNode* child;
                         child = (0 == parentKeyIdx)
@@ -534,7 +533,7 @@ HbIndex::Delete(const s64 key)
                         Move(parent->m_Items, child->m_Items, child->m_NumKeys);
                         parent->m_NumKeys = child->m_NumKeys;
 
-                        assert(!child->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+                        hbassert(!child->m_Items[HbIndexNode::NUM_KEYS].m_Node);
                         parent->m_Items[HbIndexNode::NUM_KEYS].m_Node = NULL;
                         if(child->m_Prev)
                         {
@@ -562,7 +561,7 @@ HbIndex::Delete(const s64 key)
 
             if(0 == m_Count)
             {
-                assert(node == m_Nodes);
+                hbassert(node == m_Nodes);
                 m_Nodes = NULL;
             }
             return true;
@@ -624,7 +623,7 @@ HbIndex::Validate()
             node = node->m_Items[node->m_NumKeys].m_Node;
         }
 
-        assert(!node->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+        hbassert(!node->m_Items[HbIndexNode::NUM_KEYS].m_Node);
 
         unsigned count = 0;
         for(HbIndexNode* node = m_Leaves; node; node = node->m_Items[HbIndexNode::NUM_KEYS].m_Node)
@@ -632,7 +631,7 @@ HbIndex::Validate()
             count += node->m_NumKeys;
         }
 
-        assert(count == m_Count);
+        hbassert(count == m_Count);
     }
 }
 
@@ -704,17 +703,17 @@ HbIndex::Find(const s64 key,
 void
 HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
 {
-    assert(keyIdx > 0);
+    hbassert(keyIdx > 0);
 
     HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
     //Left sibling
     HbIndexNode* sibling = parent->m_Items[keyIdx-1].m_Node;
-    assert(node->m_NumKeys >= count);
-    assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+    hbassert(node->m_NumKeys >= count);
+    hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
 
     if(node->m_NumKeys == count)
     {
-        if(!hbVerify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        if(!hbverify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
         {
             return;
         }
@@ -737,7 +736,7 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 
         if(0 == node->m_NumKeys)
         {
-            assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+            hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
 
             sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
             sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
@@ -777,7 +776,7 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 
     if(0 == parent->m_NumKeys)
     {
-        assert(parent == m_Nodes);
+        hbassert(parent == m_Nodes);
 
         HbIndexNode* child = parent->m_Items[0].m_Node;
         Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
@@ -807,17 +806,17 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 void
 HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
 {
-    assert(keyIdx < parent->m_NumKeys);
+    hbassert(keyIdx < parent->m_NumKeys);
 
     HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
     //Right sibling
     HbIndexNode* sibling = parent->m_Items[keyIdx+1].m_Node;
-    assert(node->m_NumKeys >= count);
-    assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+    hbassert(node->m_NumKeys >= count);
+    hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
 
     if(node->m_NumKeys == count)
     {
-        if(!hbVerify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        if(!hbverify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
         {
             return;
         }
@@ -840,7 +839,7 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
 
         if(0 == node->m_NumKeys)
         {
-            assert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+            hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
 
             Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
             Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
@@ -883,7 +882,7 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
 
     if(0 == parent->m_NumKeys)
     {
-        assert(parent == m_Nodes);
+        hbassert(parent == m_Nodes);
 
         HbIndexNode* child = parent->m_Items[0].m_Node;
         Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
@@ -956,9 +955,9 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         for(int i = 1; i < node->m_NumKeys; ++i)
         {
 #if ALLOW_DUPS
-            assert(node->m_Keys[i] >= node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i] >= node->m_Keys[i-1]);
 #else
-            assert(node->m_Keys[i] > node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i] > node->m_Keys[i-1]);
 #endif
         }
     }
@@ -967,15 +966,15 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         //Allow duplicates in the leaves
         for(int i = 1; i < node->m_NumKeys; ++i)
         {
-            assert(node->m_Keys[i] >= node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i] >= node->m_Keys[i-1]);
         }
     }
 
 #if TRIM_NODE
     for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
     {
-        assert(0 == node->m_Keys[i]);
-        assert(node->m_Items[i].m_Node != node->m_Items[HbIndexNode::NUM_KEYS].m_Node
+        hbassert(0 == node->m_Keys[i]);
+        hbassert(node->m_Items[i].m_Node != node->m_Items[HbIndexNode::NUM_KEYS].m_Node
                 || 0 == node->m_Items[i].m_Node);
     }
 #endif
@@ -990,9 +989,9 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
             for(int j = 0; j < child->m_NumKeys; ++j)
             {
 #if ALLOW_DUPS
-                assert(child->m_Keys[j] <= key);
+                hbassert(child->m_Keys[j] <= key);
 #else
-                assert(child->m_Keys[j] < key);
+                hbassert(child->m_Keys[j] < key);
 #endif
             }
 
@@ -1005,7 +1004,7 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
                 const HbIndexNode* nextChild = node->m_Items[i+1].m_Node;
                 if(child->m_Keys[child->m_NumKeys-1]+1 == nextChild->m_Keys[0])
                 {
-                    assert(node->m_Keys[i] == child->m_Keys[child->m_NumKeys-1]);
+                    hbassert(node->m_Keys[i] == child->m_Keys[child->m_NumKeys-1]);
                 }
             }
 #endif
@@ -1016,7 +1015,7 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         const HbIndexNode* rightSibling = node->m_Items[node->m_NumKeys].m_Node;
         for(int j = 0; j < rightSibling->m_NumKeys; ++j)
         {
-            assert(rightSibling->m_Keys[j] >= key);
+            hbassert(rightSibling->m_Keys[j] >= key);
         }
 
         /*for(int i = 0; i < node->m_NumKeys; ++i)
@@ -1026,7 +1025,7 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
             const HbIndexNode* b = node->m_Items[i+1].m_Node;
             if(a->m_NumKeys < HbIndexNode::NUM_KEYS)
             {
-                assert(a->m_Keys[a->m_NumKeys-1] != b->m_Keys[0]);
+                hbassert(a->m_Keys[a->m_NumKeys-1] != b->m_Keys[0]);
             }
         }*/
 
@@ -1171,10 +1170,10 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     {
         kv[i].m_Value = i;
         index.Insert(kv[i].m_Key, kv[i].m_Value);
-        assert(index.Find(kv[i].m_Key, &value));
+        hbassert(index.Find(kv[i].m_Key, &value));
         if(unique)
         {
-            assert(value == kv[i].m_Value);
+            hbassert(value == kv[i].m_Value);
         }
         //index.Validate();
     }
@@ -1185,10 +1184,10 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 
     for(int i = 0; i < numKeys; ++i)
     {
-        assert(index.Find(kv[i].m_Key, &value));
+        hbassert(index.Find(kv[i].m_Key, &value));
         if(unique)
         {
-            assert(value == kv[i].m_Value);
+            hbassert(value == kv[i].m_Value);
         }
     }
 
@@ -1196,16 +1195,16 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 
     for(int i = 0; i < numKeys; ++i)
     {
-        assert(index.Find(kv[i].m_Key, &value));
+        hbassert(index.Find(kv[i].m_Key, &value));
         if(unique)
         {
-            assert(value == kv[i].m_Value);
+            hbassert(value == kv[i].m_Value);
         }
     }*/
 
     for(int i = 0; i < numKeys; ++i)
     {
-        hbVerify(index.Delete(kv[i].m_Key));
+        hbverify(index.Delete(kv[i].m_Key));
         //index.Validate();
     }
 
@@ -1234,18 +1233,18 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
             index.Insert(kv[idx].m_Key, kv[idx].m_Value);
             //index.Validate();
             kv[idx].m_Added = true;
-            assert(index.Find(kv[idx].m_Key, &value));
+            hbassert(index.Find(kv[idx].m_Key, &value));
             if(unique)
             {
-                assert(value == kv[idx].m_Value);
+                hbassert(value == kv[idx].m_Value);
             }
         }
         else
         {
-            hbVerify(index.Delete(kv[idx].m_Key));
+            hbverify(index.Delete(kv[idx].m_Key));
             //index.Validate();
             kv[idx].m_Added = false;
-            assert(!index.Find(kv[idx].m_Key, &value));
+            hbassert(!index.Find(kv[idx].m_Key, &value));
         }
     }
 
@@ -1255,15 +1254,15 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
     {
         if(kv[i].m_Added)
         {
-            assert(index.Find(kv[i].m_Key, &value));
+            hbassert(index.Find(kv[i].m_Key, &value));
             if(unique)
             {
-                assert(value == kv[i].m_Value);
+                hbassert(value == kv[i].m_Value);
             }
         }
         else
         {
-            assert(!index.Find(kv[i].m_Key, &value));
+            hbassert(!index.Find(kv[i].m_Key, &value));
         }
     }
 
@@ -1306,7 +1305,7 @@ HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range
     {
         ++count;
     }
-    assert(count == numKeys);
+    hbassert(count == numKeys);
 }
 
 void
@@ -1335,7 +1334,7 @@ HbIndexTest::AddDups(const int numKeys, const int min, const int max)
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            hbVerify(index.Delete(min));
+            hbverify(index.Delete(min));
         }
     }
     else
@@ -1347,12 +1346,12 @@ HbIndexTest::AddDups(const int numKeys, const int min, const int max)
             {
                 iii = 0;
             }
-            hbVerify(index.Delete((i%range)+min));
+            hbverify(index.Delete((i%range)+min));
             index.Validate();
         }
     }
 
     index.Validate();
 
-    assert(0 == index.Count());
+    hbassert(0 == index.Count());
 }
