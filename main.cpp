@@ -16,13 +16,13 @@ int main(int /*argc*/, char** /*argv*/)
 
     HbStopWatch sw;
 
-    sw.Restart();
+/*    sw.Restart();
     HbDictTest::AddRandomKeys(1024*1024);
     sw.Stop();
-    s_Log.Debug("DICT: %f", sw.GetElapsed());
+    s_Log.Debug("DICT: %f", sw.GetElapsed());*/
 
     sw.Restart();
-    HbSkipListTest::AddRandomKeys(1024*1024, true, 0);
+    HbSkipListTest::AddRandomKeys2(1024*1024, true, 0);
     sw.Stop();
     s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());
 

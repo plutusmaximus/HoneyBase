@@ -78,6 +78,8 @@ public:
 
     u64 Count() const;
 
+    double GetUtilization() const;
+
     void Validate();
 
 private:

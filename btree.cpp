@@ -8,6 +8,8 @@
 #include <windows.h>
 #endif
 
+static HbLog s_Log("btree");
+
 #define UB 1
 template<typename T>
 static inline void Move(T* dst, const T* src, const size_t count)
@@ -608,6 +610,12 @@ HbIndex::Count() const
     return m_Count;
 }
 
+double
+HbIndex::GetUtilization() const
+{
+    return (m_Capacity > 0 ) ? (double)m_Count/m_Capacity : 0;
+}
+
 void
 HbIndex::Validate()
 {
@@ -1163,9 +1171,12 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     HbIndex index;
     HB_ASSERTONLY(s64 value);
 
+    HbStopWatch sw;
+
     KV* kv = new KV[numKeys];
     CreateRandomKeys(kv, numKeys, unique, range);
-    static int iii;
+
+    sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
@@ -1177,11 +1188,14 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
         }
         //index.Validate();
     }
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
 
     //index.Validate();
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
+    sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
         hbassert(index.Find(kv[i].m_Key, &value));
@@ -1190,6 +1204,10 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
             hbassert(value == kv[i].m_Value);
         }
     }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+
+    s_Log.Debug("utilization: %f", index.GetUtilization());
 
     /*std::sort(&kv[0], &kv[numKeys]);
 
