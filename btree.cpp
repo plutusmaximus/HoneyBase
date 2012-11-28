@@ -11,8 +11,9 @@
 static HbLog s_Log("btree");
 
 #define UB 1
+
 template<typename T>
-static inline void Move(T* dst, const T* src, const size_t count)
+static inline void hbMove(T* dst, const T* src, const size_t count)
 {
     if(count > 0)
     {
@@ -151,16 +152,21 @@ HbIndex::Insert(const s64 key, const s64 value)
 #if AUTO_DEFRAG
         if(HbIndexNode::NUM_KEYS == node->m_NumKeys && parent)
         {
+            //If there's room in the left or right sibling
+            //then move some items over.
+
             HbIndexNode* sibling = NULL;
             if(keyIdx > 0)
             {
                 //Left sibling
                 sibling = parent->m_Items[keyIdx-1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1
-                    //Don't split dups
-                    && node->m_Keys[0] != node->m_Keys[1])
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    MergeLeft(parent, keyIdx, 1, depth);
+                    const int numToMove =
+                        (HbIndexNode::NUM_KEYS - sibling->m_NumKeys) / 2;
+
+                    //Move items over to the left sibling.
+                    MergeLeft(parent, keyIdx, numToMove, depth);
 
 #if UB
                     if(key < parent->m_Keys[keyIdx-1])
@@ -182,11 +188,13 @@ HbIndex::Insert(const s64 key, const s64 value)
             {
                 //right sibling
                 sibling = parent->m_Items[keyIdx+1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1
-                    //Don't split dups
-                    && node->m_Keys[node->m_NumKeys-1] != node->m_Keys[node->m_NumKeys-2])
+                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
                 {
-                    MergeRight(parent, keyIdx, 1, depth);
+                    const int numToMove =
+                        (HbIndexNode::NUM_KEYS - sibling->m_NumKeys) / 2;
+
+                    //Move items over to the right sibling.
+                    MergeRight(parent, keyIdx, numToMove, depth);
 
 #if UB
                     if(key >= parent->m_Keys[keyIdx])
@@ -216,50 +224,22 @@ HbIndex::Insert(const s64 key, const s64 value)
 
             int splitLoc = HbIndexNode::NUM_KEYS / 2;
 
-            //If we have dups, don't split the dups.
-            /*if(splitLoc < HbIndexNode::NUM_KEYS-1)
-            {
-                if(isLeaf)
-                {
-                    if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc-1])
-                    {
-                        splitLoc += Bound(node->m_Keys[splitLoc],
-                                            &node->m_Keys[splitLoc],
-                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
-                        hbassert(splitLoc <= HbIndexNode::NUM_KEYS);
-
-                        //If the dups extend to the end of the node it's ok to split
-                        //on the last dup because the item currently being inserted
-                        //will fill the hole.
-                        if(splitLoc == HbIndexNode::NUM_KEYS)
-                        {
-                            --splitLoc;
-                        }
-                    }
-                }
-                else
-                {
-                    if(node->m_Keys[splitLoc] == node->m_Keys[splitLoc+1])
-                    {
-                        splitLoc += Bound(node->m_Keys[splitLoc],
-                                            &node->m_Keys[splitLoc],
-                                            &node->m_Keys[HbIndexNode::NUM_KEYS]);
-                        hbassert(splitLoc <= HbIndexNode::NUM_KEYS);
-
-                        //If the dups extend to the end of the node it's ok to split
-                        //on the last dup because the item currently being inserted
-                        //will fill the hole.
-                        if(splitLoc == HbIndexNode::NUM_KEYS)
-                        {
-                            --splitLoc;
-                        }
-                    }
-                }
-            }*/
-
             HbIndexNode* newNode = AllocNode();
             const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
             hbassert(numToCopy > 0);
+
+            if(!parent)
+            {
+                parent = m_Nodes = AllocNode();
+                parent->m_Items[0].m_Node = node;
+                ++m_Depth;
+                ++depth;
+            }
+
+            //Make room in the parent for a reference to the new node.
+            hbassert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
+            hbMove(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
 
             if(isLeaf)
             {
@@ -273,6 +253,23 @@ HbIndex::Insert(const s64 key, const s64 value)
                 memcpy(newNode->m_Items, &node->m_Items[splitLoc], numToCopy * sizeof(node->m_Items[0]));
                 newNode->m_NumKeys = numToCopy;
                 node->m_NumKeys -= numToCopy;
+
+                //Copy the last key in the node up into the parent.
+#if UB
+                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
+#else
+                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
+#endif
+
+                //Insert the new node into the linked list of nodes
+                HbIndexNode* next = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node = next;
+                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
+                newNode->m_Prev = node;
+                if(next)
+                {
+                    next->m_Prev = newNode;
+                }
             }
             else
             {
@@ -290,39 +287,8 @@ HbIndex::Insert(const s64 key, const s64 value)
                 //This is also why NUM_KEYS must be >= 4.  It guarantees numToCopy+1
                 //will always be >= 1.
                 node->m_NumKeys -= numToCopy+1;
-            }
 
-            if(!parent)
-            {
-                parent = m_Nodes = AllocNode();
-                parent->m_Items[0].m_Node = node;
-                ++m_Depth;
-                ++depth;
-            }
-
-            hbassert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
-            Move(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
-            Move(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
-
-            if(isLeaf)
-            {
-#if UB
-                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
-#else
-                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
-#endif
-
-                HbIndexNode* next = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node = next;
-                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
-                newNode->m_Prev = node;
-                if(next)
-                {
-                    next->m_Prev = newNode;
-                }
-            }
-            else
-            {
+                //Copy the last key in the node up into the parent.
                 parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
             }
 
@@ -349,8 +315,8 @@ HbIndex::Insert(const s64 key, const s64 value)
         }
     }
 
-    Move(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], node->m_NumKeys-keyIdx);
-    Move(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], node->m_NumKeys-keyIdx);
+    hbMove(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], node->m_NumKeys-keyIdx);
+    hbMove(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], node->m_NumKeys-keyIdx);
 
     node->m_Keys[keyIdx] = key;
     node->m_Items[keyIdx].m_Value = value;
@@ -370,14 +336,26 @@ HbIndex::Delete(const s64 key)
 
     for(int depth = 0; depth < m_Depth-1; ++depth)
     {
-        if(parent)// && parent->m_NumKeys > 1)
+        if(parent)
         {
+            //1.  If the total number of items between the node and the neighbor
+            //    is less than max then merge with the neighbor.
+            //    Remove the newly empty node.
+            //2.  If the current node has only 1 item borrow one from a neighbor.
+            //    If the neighbor ends up empty then remove it.
+            //In both cases we avoid traversing backwards up the tree to remove
+            //empty nodes after removing a leaf.
+
             HbIndexNode* sibling = NULL;
             HbIndexNode* leftSibling = parentKeyIdx > 0 ? parent->m_Items[parentKeyIdx-1].m_Node : NULL;
             HbIndexNode* rightSibling = parentKeyIdx < parent->m_NumKeys ? parent->m_Items[parentKeyIdx+1].m_Node : NULL;
+
+            //If combined number of items is less than the maximum then merge with left sibling
             if(leftSibling && (node->m_NumKeys + leftSibling->m_NumKeys) < HbIndexNode::NUM_KEYS)
             {
-                //Merge with the left sibling
+                //Merge with the left sibling.
+                //Move items from the node with fewer items into the
+                //node with more items.
                 sibling = leftSibling;
                 if(node->m_NumKeys < leftSibling->m_NumKeys)
                 {
@@ -388,22 +366,18 @@ HbIndex::Delete(const s64 key)
                     MergeRight(parent, parentKeyIdx-1, sibling->m_NumKeys, depth);
                 }
             }
+            //If only one item try to borrow one from sibling
             else if(leftSibling && 1 == node->m_NumKeys)
             {
-                //Borrow one from the left sibling
                 sibling = leftSibling;
-                //DO NOT SUBMIT
-                if(leftSibling->m_NumKeys >= 2
-                    && leftSibling->m_Keys[leftSibling->m_NumKeys-1] == leftSibling->m_Keys[leftSibling->m_NumKeys-2])
-                {
-                    //splitting dups
-                    OutputDebugString("HERE\n");
-                }
                 MergeRight(parent, parentKeyIdx-1, 1, depth);
             }
+            //If combined number of items is less than the maximum then merge with right sibling
             else if(rightSibling && (node->m_NumKeys + rightSibling->m_NumKeys) < HbIndexNode::NUM_KEYS)
             {
                 //Merge with the right sibling
+                //Move items from the node with fewer items into the
+                //node with more items.
                 sibling = rightSibling;
                 if(node->m_NumKeys < rightSibling->m_NumKeys)
                 {
@@ -414,20 +388,15 @@ HbIndex::Delete(const s64 key)
                     MergeLeft(parent, parentKeyIdx+1, sibling->m_NumKeys, depth);
                 }
             }
+            //If only one item try to borrow one from sibling
             else if(rightSibling && 1 == node->m_NumKeys)
             {
                 //Borrow one from the right sibling
                 sibling = rightSibling;
-                //DO NOT SUBMIT
-                if(rightSibling->m_NumKeys >= 2
-                    && rightSibling->m_Keys[0] == rightSibling->m_Keys[1])
-                {
-                    //splitting dups
-                    OutputDebugString("HERE\n");
-                }
                 MergeLeft(parent, parentKeyIdx+1, 1, depth);
             }
 
+            //If the node and/or the sibling is now empty remove it/them.
             if(0 == node->m_NumKeys)
             {
                 FreeNode(node);
@@ -435,6 +404,9 @@ HbIndex::Delete(const s64 key)
                 if(0 == sibling->m_NumKeys)
                 {
                     FreeNode(sibling);
+                    //Freeing the node and the sibling implies
+                    //we've removed an entire level of nodes
+                    //so reduce the depth.
                     node = parent;
                     --depth;
                 }
@@ -469,10 +441,12 @@ HbIndex::Delete(const s64 key)
         {
             if(node->m_NumKeys > 1)
             {
+                //Remove the item from the leaf
+
                 --node->m_NumKeys;
 
-                Move(&node->m_Keys[keyIdx], &node->m_Keys[keyIdx+1], node->m_NumKeys-keyIdx);
-                Move(&node->m_Items[keyIdx], &node->m_Items[keyIdx+1], node->m_NumKeys-keyIdx);
+                hbMove(&node->m_Keys[keyIdx], &node->m_Keys[keyIdx+1], node->m_NumKeys-keyIdx);
+                hbMove(&node->m_Items[keyIdx], &node->m_Items[keyIdx+1], node->m_NumKeys-keyIdx);
 
 #if TRIM_NODE
                 TrimNode(node, m_Depth-1);
@@ -485,6 +459,8 @@ HbIndex::Delete(const s64 key)
             }
             else
             {
+                //Remove the entire leaf
+
                 if(node->m_Prev)
                 {
                     node->m_Prev->m_Items[HbIndexNode::NUM_KEYS].m_Node =
@@ -498,6 +474,7 @@ HbIndex::Delete(const s64 key)
 
                 if(node == m_Leaves)
                 {
+                    //This was the first leaf - replace it with the next leaf
                     m_Leaves = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
                 }
 
@@ -505,6 +482,8 @@ HbIndex::Delete(const s64 key)
 
                 if(parent)
                 {
+                    //After removing the leaf adjust the parent.
+
                     --parent->m_NumKeys;
 
                     if(parent->m_NumKeys > 0)
@@ -513,8 +492,8 @@ HbIndex::Delete(const s64 key)
                         {
                             parent->m_Items[parentKeyIdx].m_Node = parent->m_Items[parentKeyIdx+1].m_Node;
 
-                            Move(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
-                            Move(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx+1);
+                            hbMove(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
+                            hbMove(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx+1);
                         }
 #if TRIM_NODE
                         TrimNode(parent, m_Depth-2);
@@ -524,6 +503,11 @@ HbIndex::Delete(const s64 key)
                     }
                     else
                     {
+                        //All keys have been deleted, but we still have
+                        //a leaf.  Copy the leaf up into the parent
+                        //and reduce the total depth of the tree, thus the
+                        //parent becomes a leaf
+
                         hbassert(parent == m_Nodes);
 
                         HbIndexNode* child;
@@ -531,21 +515,16 @@ HbIndex::Delete(const s64 key)
                                 ? parent->m_Items[1].m_Node
                                 : parent->m_Items[0].m_Node;
 
-                        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
-                        Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+                        hbMove(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+                        hbMove(parent->m_Items, child->m_Items, child->m_NumKeys);
                         parent->m_NumKeys = child->m_NumKeys;
 
                         hbassert(!child->m_Items[HbIndexNode::NUM_KEYS].m_Node);
-                        parent->m_Items[HbIndexNode::NUM_KEYS].m_Node = NULL;
-                        if(child->m_Prev)
-                        {
-                            child->m_Prev->m_Items[HbIndexNode::NUM_KEYS].m_Node = NULL;
-                        }
+                        hbassert(!child->m_Prev);
+                        hbassert(m_Leaves == child);
 
-                        if(child == m_Leaves)
-                        {
-                            m_Leaves = parent;
-                        }
+                        parent->m_Items[HbIndexNode::NUM_KEYS].m_Node = NULL;
+                        m_Leaves = parent;
 
                         FreeNode(child);
                         --m_Depth;
@@ -731,16 +710,25 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 
     if(!isLeaf)
     {
-        for(int i = 0; i < count; ++i)
+        sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
+        parent->m_Keys[keyIdx-1] = node->m_Keys[count-1];
+        hbMove(&sibling->m_Keys[sibling->m_NumKeys+1], &node->m_Keys[0], count-1);
+        hbMove(&sibling->m_Items[sibling->m_NumKeys+1], &node->m_Items[0], count);
+        hbMove(&node->m_Keys[0], &node->m_Keys[count], node->m_NumKeys-count);
+        hbMove(&node->m_Items[0], &node->m_Items[count], node->m_NumKeys-count+1);
+        sibling->m_NumKeys += count;
+        node->m_NumKeys -= count;
+
+        /*for(int i = 0; i < count; ++i)
         {
             sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
             parent->m_Keys[keyIdx-1] = node->m_Keys[0];
             sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
-            Move(&node->m_Keys[0], &node->m_Keys[1], node->m_NumKeys-1);
-            Move(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys);
+            hbMove(&node->m_Keys[0], &node->m_Keys[1], node->m_NumKeys-1);
+            hbMove(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys);
             ++sibling->m_NumKeys;
             --node->m_NumKeys;
-        }
+        }*/
 
         if(0 == node->m_NumKeys)
         {
@@ -749,19 +737,19 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
             sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
             sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
             ++sibling->m_NumKeys;
-            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
-            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
             --parent->m_NumKeys;
         }
     }
     else
     {
         //Move count items from the node to the left sibling
-        Move(&sibling->m_Keys[sibling->m_NumKeys], &node->m_Keys[0], count);
-        Move(&sibling->m_Items[sibling->m_NumKeys], &node->m_Items[0], count);
+        hbMove(&sibling->m_Keys[sibling->m_NumKeys], &node->m_Keys[0], count);
+        hbMove(&sibling->m_Items[sibling->m_NumKeys], &node->m_Items[0], count);
 
-        Move(&node->m_Keys[0], &node->m_Keys[count], node->m_NumKeys-count);
-        Move(&node->m_Items[0], &node->m_Items[count], node->m_NumKeys-count);
+        hbMove(&node->m_Keys[0], &node->m_Keys[count], node->m_NumKeys-count);
+        hbMove(&node->m_Items[0], &node->m_Items[count], node->m_NumKeys-count);
 
         sibling->m_NumKeys += count;
         node->m_NumKeys -= count;
@@ -776,8 +764,8 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
         }
         else
         {
-            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
-            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
+            hbMove(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
             --parent->m_NumKeys;
         }
     }
@@ -787,14 +775,14 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
         hbassert(parent == m_Nodes);
 
         HbIndexNode* child = parent->m_Items[0].m_Node;
-        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+        hbMove(parent->m_Keys, child->m_Keys, child->m_NumKeys);
         if(isLeaf)
         {
-            Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+            hbMove(parent->m_Items, child->m_Items, child->m_NumKeys);
         }
         else
         {
-            Move(parent->m_Items, child->m_Items, child->m_NumKeys+1);
+            hbMove(parent->m_Items, child->m_Items, child->m_NumKeys+1);
         }
 
         parent->m_NumKeys = child->m_NumKeys;
@@ -834,40 +822,57 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
 
     if(!isLeaf)
     {
-        for(int i = 0; i < count; ++i)
+        //                    kp
+        // k0 k1 k2 k3 k4        k6 k7
+        //v0 v1 v2 v3 v4 v5     v6 v7 v8
+
+        //             k2
+        // k0 k1           k3 k4 kp k6 k7
+        //v0 v1 v2        v3 v4 v5 v6 v7 v8
+
+        hbMove(&sibling->m_Keys[count], &sibling->m_Keys[0], sibling->m_NumKeys);
+        hbMove(&sibling->m_Items[count], &sibling->m_Items[0], sibling->m_NumKeys+1);
+        sibling->m_Keys[count-1] = parent->m_Keys[keyIdx];
+        parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-count];
+        hbMove(&sibling->m_Keys[0], &node->m_Keys[node->m_NumKeys-(count-1)], count-1);
+        hbMove(&sibling->m_Items[0], &node->m_Items[node->m_NumKeys+1-count], count);
+        sibling->m_NumKeys += count;
+        node->m_NumKeys -= count;
+
+        /*for(int i = 0; i < count; ++i)
         {
-            Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
-            Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
+            hbMove(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
+            hbMove(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
             sibling->m_Keys[0] = parent->m_Keys[keyIdx];
             parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
             sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
             ++sibling->m_NumKeys;
             --node->m_NumKeys;
-        }
+        }*/
 
         if(0 == node->m_NumKeys)
         {
             hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
 
-            Move(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
-            Move(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
+            hbMove(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
+            hbMove(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
             sibling->m_Keys[0] = parent->m_Keys[keyIdx];
             sibling->m_Items[0] = node->m_Items[0];
             ++sibling->m_NumKeys;
-            Move(&parent->m_Keys[keyIdx], &parent->m_Keys[keyIdx+1], parent->m_NumKeys-keyIdx);
-            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Keys[keyIdx], &parent->m_Keys[keyIdx+1], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
             --parent->m_NumKeys;
         }
     }
     else
     {
         //Make room in the right sibling for items from the node
-        Move(&sibling->m_Keys[count], &sibling->m_Keys[0], sibling->m_NumKeys);
-        Move(&sibling->m_Items[count], &sibling->m_Items[0], sibling->m_NumKeys);
+        hbMove(&sibling->m_Keys[count], &sibling->m_Keys[0], sibling->m_NumKeys);
+        hbMove(&sibling->m_Items[count], &sibling->m_Items[0], sibling->m_NumKeys);
 
         //Move count items from the node to the right sibling
-        Move(&sibling->m_Keys[0], &node->m_Keys[node->m_NumKeys-count], count);
-        Move(&sibling->m_Items[0], &node->m_Items[node->m_NumKeys-count], count);
+        hbMove(&sibling->m_Keys[0], &node->m_Keys[node->m_NumKeys-count], count);
+        hbMove(&sibling->m_Items[0], &node->m_Items[node->m_NumKeys-count], count);
 
         sibling->m_NumKeys += count;
         node->m_NumKeys -= count;
@@ -882,8 +887,8 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
         }
         else
         {
-            Move(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
-            Move(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
+            hbMove(&parent->m_Keys[keyIdx-1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx-1);
+            hbMove(&parent->m_Items[keyIdx], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
             --parent->m_NumKeys;
         }
     }
@@ -893,14 +898,14 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
         hbassert(parent == m_Nodes);
 
         HbIndexNode* child = parent->m_Items[0].m_Node;
-        Move(parent->m_Keys, child->m_Keys, child->m_NumKeys);
+        hbMove(parent->m_Keys, child->m_Keys, child->m_NumKeys);
         if(isLeaf)
         {
-            Move(parent->m_Items, child->m_Items, child->m_NumKeys);
+            hbMove(parent->m_Items, child->m_Items, child->m_NumKeys);
         }
         else
         {
-            Move(parent->m_Items, child->m_Items, child->m_NumKeys+1);
+            hbMove(parent->m_Items, child->m_Items, child->m_NumKeys+1);
         }
 
         parent->m_NumKeys = child->m_NumKeys;

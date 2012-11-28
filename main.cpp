@@ -16,15 +16,15 @@ int main(int /*argc*/, char** /*argv*/)
 
     HbStopWatch sw;
 
-/*    sw.Restart();
+    sw.Restart();
     HbDictTest::AddRandomKeys(1024*1024);
     sw.Stop();
-    s_Log.Debug("DICT: %f", sw.GetElapsed());*/
+    s_Log.Debug("DICT: %f", sw.GetElapsed());
 
-    sw.Restart();
+    /*sw.Restart();
     HbSkipListTest::AddRandomKeys2(1024*1024, true, 0);
     sw.Stop();
-    s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());
+    s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());*/
 
     sw.Restart();
     HbIndexTest::AddRandomKeys(1024*1024, true, 0);
@@ -39,8 +39,8 @@ int main(int /*argc*/, char** /*argv*/)
     //HbIndexTest::AddRandomKeys(1024*1024, false, 1);
     //HbIndexTest::AddRandomKeys(1024*1024, true, 0);
 
-    //HbIndexTest::AddSortedKeys(1024*1024, true, 0, true);
-    //HbIndexTest::AddSortedKeys(1024*1024, true, 0, false);
+    HbIndexTest::AddSortedKeys(1024*1024, true, 0, true);
+    HbIndexTest::AddSortedKeys(1024*1024, true, 0, false);
 
     //HbIndexTest::AddDups(1024*1024, 1, 1);
     //HbIndexTest::AddDups(1024*1024, 1, 2);

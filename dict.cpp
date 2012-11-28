@@ -7,12 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#if _MSC_VER
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
-
-#define UB 1
+static HbLog s_Log("dict");
 
 #define FNV1_32_INIT ((u32)0x811c9dc5)
 
@@ -651,7 +646,7 @@ HbDict::HashString(const byte* string, const size_t stringLen) const
 void
 HbDict::Set(HbDictItem* newItem)
 {
-    if(m_NumSlots*2 <= m_Count)
+    if(m_Count >= m_NumSlots*2)
     {
         Slot* newSlots = (Slot*) HbHeap::ZAlloc(m_NumSlots * 2 * sizeof(Slot));
         if(newSlots)
@@ -1048,6 +1043,7 @@ HbDictTest::AddRandomKeys(const int numKeys)
         }
     }
     sw.Stop();
+    s_Log.Debug("set: %f", sw.GetElapsed());
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
@@ -1058,7 +1054,8 @@ HbDictTest::AddRandomKeys(const int numKeys)
         hbverify(value == kv[i].m_Value);
     }
     sw.Stop();
-
+    s_Log.Debug("find: %f", sw.GetElapsed());
+    
     /*std::sort(&kv[0], &kv[numKeys]);
 
     sw.Restart();

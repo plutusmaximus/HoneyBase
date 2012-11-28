@@ -48,7 +48,7 @@ class HbIndexNode
 {
 public:
 
-    static const int NUM_KEYS = 256;
+    static const int NUM_KEYS = 96;
 
     HbIndexNode();
 
