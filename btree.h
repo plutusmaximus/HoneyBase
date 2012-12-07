@@ -3,11 +3,11 @@
 
 #include "hb.h"
 
-class HbIndexNode;
+class HbBTreeNode;
 
 class HbIterator
 {
-    friend class HbIndex;
+    friend class HbBTree;
 public:
     HbIterator();
     ~HbIterator();
@@ -24,55 +24,64 @@ public:
 
 private:
 
-    HbIndexNode* m_Cur;
+    HbBTreeNode* m_Cur;
     int m_ItemIndex;
 };
 
-class HbIndexItem
+class HbBTreeItem
 {
 public:
-
-    HbIndexItem()
-        : m_Value(0)
-    {
-    }
 
     union
     {
-        s64 m_Value;
-        HbIndexNode* m_Node;
+        s64 m_Int;
+        HbString* m_String;
+        HbBTreeNode* m_Node;
     };
+
+    HbValueType m_Type;
 };
 
-class HbIndexNode
+class HbBTreeNode
 {
 public:
 
-    static const int NUM_KEYS = 96;
+    static const int MAX_KEYS = 96;
 
-    HbIndexNode();
-
-    bool HasDups() const;
-
-    s64 m_Keys[NUM_KEYS];
-    HbIndexItem m_Items[NUM_KEYS+1];
-
-    HbIndexNode* m_Prev;
+    HbBTreeNode* m_Prev;
 
     int m_NumKeys;
+    const int m_MaxKeys;
+
+    HbKey m_Keys[MAX_KEYS];
+    HbBTreeItem m_Items[MAX_KEYS+1];
+
+    inline bool IsFull() const
+    {
+        return m_NumKeys == m_MaxKeys;
+    }
+
+private:
+    HbBTreeNode();
+    ~HbBTreeNode();
+    HbBTreeNode(const HbBTreeNode&);
+    HbBTreeNode& operator=(const HbBTreeNode&);
 };
 
-class HbIndex
+class HbBTree
 {
 public:
 
-    HbIndex();
+    static HbBTree* Create();
+    static void Destroy(HbBTree* btree);
 
-    bool Insert(const s64 key, const s64 value);
+    bool Insert(const HbKey key, const s64 value);
 
-    bool Delete(const s64 key);
+    bool Delete(const HbKey key);
 
-    bool Find(const s64 key, s64* value) const;
+    void DeleteAll();
+
+    bool Find(const HbKey key, s64* value) const;
 
     bool GetFirst(HbIterator* it);
 
@@ -84,46 +93,52 @@ public:
 
 private:
 
-    bool Find(const s64 key,
-            const HbIndexNode** outNode,
+    bool Find(const HbKey key,
+            const HbBTreeNode** outNode,
             int* outKeyIdx,
-            const HbIndexNode** outParent,
+            const HbBTreeNode** outParent,
             int* outParentKeyIdx) const;
-    bool Find(const s64 key,
-            HbIndexNode** outNode,
+    bool Find(const HbKey key,
+            HbBTreeNode** outNode,
             int* outKeyIdx,
-            HbIndexNode** outParent,
+            HbBTreeNode** outParent,
             int* outParentKeyIdx);
 
-    void MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const int depth);
-    void MergeRight(HbIndexNode* parent, const int keyIdx, const int count, const int depth);
+    void MergeLeft(HbBTreeNode* parent, const int keyIdx, const int count, const int depth);
+    void MergeRight(HbBTreeNode* parent, const int keyIdx, const int count, const int depth);
 
-    void TrimNode(HbIndexNode* node, const int depth);
+    void TrimNode(HbBTreeNode* node, const int depth);
 
-    void ValidateNode(const int depth, HbIndexNode* node);
+    void ValidateNode(const int depth, HbBTreeNode* node);
 
-    HbIndexNode* AllocNode();
-    void FreeNode(HbIndexNode* node);
+    HbBTreeNode* AllocNode();
+    void FreeNode(HbBTreeNode* node);
 
-    static int Bound(const s64 key, const s64* first, const s64* end);
-    static int LowerBound(const s64 key, const s64* first, const s64* end);
-    static int UpperBound(const s64 key, const s64* first, const s64* end);
+    static int Bound(const HbKey key, const HbKey* first, const HbKey* end);
+    static int LowerBound(const HbKey key, const HbKey* first, const HbKey* end);
+    static int UpperBound(const HbKey key, const HbKey* first, const HbKey* end);
 
-    HbIndexNode* m_Nodes;
+    HbBTreeNode* m_Nodes;
 
-    HbIndexNode* m_Leaves;
+    HbBTreeNode* m_Leaves;
 
     u64 m_Count;
     u64 m_Capacity;
     int m_Depth;
+    HbKeyType m_KeyType;
+
+    HbBTree();
+    ~HbBTree();
+    HbBTree(const HbBTree&);
+    HbBTree& operator=(const HbBTree&);
 };
 
-class HbIndexTest
+class HbBTreeTest
 {
 public:
     struct KV
     {
-        int m_Key;
+        HbKey m_Key;
         int m_Value;
         bool m_Added : 1;
 
@@ -134,7 +149,7 @@ public:
 
         bool operator<(const KV& a) const
         {
-            return m_Key < a.m_Key;
+            return m_Key.m_Int < a.m_Key.m_Int;
         }
     };
 

@@ -54,6 +54,14 @@ typedef u8          byte;
 unsigned HbRand();
 unsigned HbRand(const unsigned min, const unsigned max);
 
+enum HbKeyType
+{
+    HB_KEYTYPE_INVALID,
+    HB_KEYTYPE_INT,
+    HB_KEYTYPE_DOUBLE,
+    HB_KEYTYPE_STRING
+};
+
 enum HbValueType
 {
     HB_VALUETYPE_INVALID,
@@ -63,48 +71,8 @@ enum HbValueType
     HB_VALUETYPE_CONTAINER
 };
 
-class HbString;
 class HbDict;
 class HbSkipList;
-
-union HbValue
-{
-    s64 m_Int;
-    double m_Double;
-    HbString* m_String;
-    HbDict* m_Dict;
-    HbSkipList* m_SkipList;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbLog
-///////////////////////////////////////////////////////////////////////////////
-class HbLog
-{
-public:
-
-    HbLog();
-    explicit HbLog(const char* channel);
-
-    void Debug(const char* fmt, ...);
-    void Error(const char* fmt, ...);
-
-private:
-
-    char m_Channel[64];
-};
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbHeap
-///////////////////////////////////////////////////////////////////////////////
-class HbHeap
-{
-public:
-
-	static void* ZAlloc(size_t size);
-
-	static void Free(void* mem);
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 //  HbString
@@ -139,8 +107,58 @@ public:
 
     HbString* Dup() const;
 
-    bool EQ(const HbString* that) const;
-    bool EQ(const byte* string, const size_t stringLen) const;
+    int Compare(const HbString* that) const
+    {
+        const byte* thatData;
+        const size_t thatLen = that->GetData(&thatData);
+        return Compare(thatData, thatLen);
+    }
+    int Compare(const byte* thatData, const size_t thatLen) const;
+
+    bool EQ(const HbString* that) const
+    {
+        return Compare(that) == 0;
+    }
+    bool EQ(const byte* thatData, const size_t thatLen) const
+    {
+        return Compare(thatData, thatLen) == 0;
+    }
+
+    bool LT(const HbString* that) const
+    {
+        return Compare(that) < 0;
+    }
+    bool LT(const byte* thatData, const size_t thatLen) const
+    {
+        return Compare(thatData, thatLen) < 0;
+    }
+
+    bool GT(const HbString* that) const
+    {
+        return Compare(that) > 0;
+    }
+    bool GT(const byte* thatData, const size_t thatLen) const
+    {
+        return Compare(thatData, thatLen) > 0;
+    }
+
+    bool LE(const HbString* that) const
+    {
+        return Compare(that) <= 0;
+    }
+    bool LE(const byte* thatData, const size_t thatLen) const
+    {
+        return Compare(thatData, thatLen) <= 0;
+    }
+
+    bool GE(const HbString* that) const
+    {
+        return Compare(that) >= 0;
+    }
+    bool GE(const byte* thatData, const size_t thatLen) const
+    {
+        return Compare(thatData, thatLen) >= 0;
+    }
 
 protected:
 
@@ -152,6 +170,101 @@ private:
     ~HbString(){}
     HbString(const HbString&);
     HbString& operator=(const HbString&);
+};
+
+class HbKey
+{
+public:
+    union
+    {
+        s64 m_Int;
+        double m_Double;
+        HbString* m_String;
+    };
+
+    int Compare(const HbKeyType keyType, const HbKey& that) const
+    {
+        switch(keyType)
+        {
+            case HB_KEYTYPE_INT:
+            case HB_KEYTYPE_DOUBLE:
+                return int(m_Int - that.m_Int);
+            break;
+            case HB_KEYTYPE_STRING:
+                return m_String->Compare(that.m_String);
+            break;
+        }
+
+        return -1;
+    }
+
+    bool EQ(const HbKeyType keyType, const HbKey& that) const
+    {
+        return Compare(keyType, that) == 0;
+    }
+
+    bool LT(const HbKeyType keyType, const HbKey& that) const
+    {
+        return Compare(keyType, that) < 0;
+    }
+
+    bool GT(const HbKeyType keyType, const HbKey& that) const
+    {
+        return Compare(keyType, that) > 0;
+    }
+
+    bool LE(const HbKeyType keyType, const HbKey& that) const
+    {
+        return Compare(keyType, that) <= 0;
+    }
+
+    bool GE(const HbKeyType keyType, const HbKey& that) const
+    {
+        return Compare(keyType, that) >= 0;
+    }
+};
+
+class HbValue
+{
+public:
+    union
+    {
+        s64 m_Int;
+        double m_Double;
+        HbString* m_String;
+        HbDict* m_Dict;
+        HbSkipList* m_SkipList;
+    };
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbLog
+///////////////////////////////////////////////////////////////////////////////
+class HbLog
+{
+public:
+
+    HbLog();
+    explicit HbLog(const char* channel);
+
+    void Debug(const char* fmt, ...);
+    void Error(const char* fmt, ...);
+
+private:
+
+    char m_Channel[64];
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//  HbHeap
+///////////////////////////////////////////////////////////////////////////////
+class HbHeap
+{
+public:
+
+	static void* ZAlloc(size_t size);
+
+	static void Free(void* mem);
 };
 
 ///////////////////////////////////////////////////////////////////////////////

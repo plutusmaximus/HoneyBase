@@ -1072,6 +1072,7 @@ HbDictTest::AddRandomKeys(const int numKeys)
         hbverify(dict->Clear(kv[i].m_Key));
     }
     sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
 
     HbDict::Destroy(dict);
     delete [] kv;

@@ -16,35 +16,46 @@ int main(int /*argc*/, char** /*argv*/)
 
     HbStopWatch sw;
 
+    s_Log.Debug("DICT");
     sw.Restart();
     HbDictTest::AddRandomKeys(1024*1024);
     sw.Stop();
-    s_Log.Debug("DICT: %f", sw.GetElapsed());
+    s_Log.Debug("total: %f", sw.GetElapsed());
 
     /*sw.Restart();
     HbSkipListTest::AddRandomKeys2(1024*1024, true, 0);
     sw.Stop();
     s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());*/
 
+    s_Log.Debug("BTREEE");
     sw.Restart();
-    HbIndexTest::AddRandomKeys(1024*1024, true, 0);
+    HbBTreeTest::AddRandomKeys(1024*1024, true, 0);
     sw.Stop();
-    s_Log.Debug("BTREEE: %f", sw.GetElapsed());
+    s_Log.Debug("total: %f", sw.GetElapsed());
+
+    s_Log.Debug("BTREEE(asc)");
+    sw.Restart();
+    HbBTreeTest::AddSortedKeys(1024*1024, true, 0, true);
+    sw.Stop();
+    s_Log.Debug("total: %f", sw.GetElapsed());
+
+    s_Log.Debug("BTREEE(desc)");
+    sw.Restart();
+    HbBTreeTest::AddSortedKeys(1024*1024, true, 0, false);
+    sw.Stop();
+    s_Log.Debug("total: %f", sw.GetElapsed());
 
     HbSkipListTest::AddDeleteRandomKeys(1024*1024, true, 0);
 
-    //HbIndexTest::AddRandomKeys(1024, true, 32767);
-    //HbIndexTest::AddRandomKeys(10, false, 1);
-    //HbIndexTest::AddRandomKeys(1024*1024, false, 32767);
-    //HbIndexTest::AddRandomKeys(1024*1024, false, 1);
-    //HbIndexTest::AddRandomKeys(1024*1024, true, 0);
+    //HbBTreeTest::AddRandomKeys(1024, true, 32767);
+    //HbBTreeTest::AddRandomKeys(10, false, 1);
+    //HbBTreeTest::AddRandomKeys(1024*1024, false, 32767);
+    //HbBTreeTest::AddRandomKeys(1024*1024, false, 1);
+    //HbBTreeTest::AddRandomKeys(1024*1024, true, 0);
 
-    HbIndexTest::AddSortedKeys(1024*1024, true, 0, true);
-    HbIndexTest::AddSortedKeys(1024*1024, true, 0, false);
-
-    //HbIndexTest::AddDups(1024*1024, 1, 1);
-    //HbIndexTest::AddDups(1024*1024, 1, 2);
-    //HbIndexTest::AddDups(1024*1024, 1, 4);
-    //HbIndexTest::AddDups(32, 1, 5);
-    //HbIndexTest::AddDups(28, 1, 5);
+    //HbBTreeTest::AddDups(1024*1024, 1, 1);
+    //HbBTreeTest::AddDups(1024*1024, 1, 2);
+    //HbBTreeTest::AddDups(1024*1024, 1, 4);
+    //HbBTreeTest::AddDups(32, 1, 5);
+    //HbBTreeTest::AddDups(28, 1, 5);
 }

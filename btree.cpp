@@ -46,7 +46,7 @@ HbIterator::HasNext() const
     if(m_Cur)
     {
         return (m_ItemIndex < m_Cur->m_NumKeys-1)
-                || (NULL != m_Cur->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+                || (NULL != m_Cur->m_Items[m_Cur->m_MaxKeys].m_Node);
     }
 
     return false;
@@ -67,7 +67,7 @@ HbIterator::Next()
 
         if(m_ItemIndex >= m_Cur->m_NumKeys)
         {
-            m_Cur = m_Cur->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+            m_Cur = m_Cur->m_Items[m_Cur->m_MaxKeys].m_Node;
             m_ItemIndex = 0;
         }
     }
@@ -78,49 +78,55 @@ HbIterator::Next()
 s64
 HbIterator::GetKey()
 {
-    return m_Cur->m_Keys[m_ItemIndex];
+    return m_Cur->m_Keys[m_ItemIndex].m_Int;
 }
 
 s64
 HbIterator::GetValue()
 {
-    return m_Cur->m_Items[m_ItemIndex].m_Value;
+    return m_Cur->m_Items[m_ItemIndex].m_Int;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbIndexNode
-///////////////////////////////////////////////////////////////////////////////
-HbIndexNode::HbIndexNode()
-: m_Prev(NULL)
-, m_NumKeys(0)
-{
-    memset(m_Keys, 0, sizeof(m_Keys));
-}
-
-bool
-HbIndexNode::HasDups() const
-{
-    return m_NumKeys >= 2
-            && m_Keys[m_NumKeys-1] == m_Keys[m_NumKeys-2];
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbIndex
+//  HbBTree
 ///////////////////////////////////////////////////////////////////////////////
 #define TRIM_NODE   0
 #define AUTO_DEFRAG 1
 
-HbIndex::HbIndex()
+HbBTree::HbBTree()
 : m_Nodes(NULL)
 , m_Leaves(NULL)
 , m_Count(0)
 , m_Capacity(0)
 , m_Depth(0)
+, m_KeyType(HB_KEYTYPE_INT)
 {
 }
 
+HbBTree*
+HbBTree::Create()
+{
+    HbBTree* btree = (HbBTree*) HbHeap::ZAlloc(sizeof(HbBTree));
+    if(btree)
+    {
+        new (btree) HbBTree();
+    }
+
+    return btree;
+}
+
+void
+HbBTree::Destroy(HbBTree* btree)
+{
+    if(btree)
+    {
+        btree->DeleteAll();
+        HbHeap::Free(btree);
+    }
+}
+
 bool
-HbIndex::Insert(const s64 key, const s64 value)
+HbBTree::Insert(const HbKey key, const s64 value)
 {
     if(!m_Nodes)
     {
@@ -133,7 +139,7 @@ HbIndex::Insert(const s64 key, const s64 value)
         ++m_Depth;
 
         m_Nodes->m_Keys[0] = key;
-        m_Nodes->m_Items[0].m_Value = value;
+        m_Nodes->m_Items[0].m_Int = value;
         ++m_Nodes->m_NumKeys;
 
         ++m_Count;
@@ -141,8 +147,8 @@ HbIndex::Insert(const s64 key, const s64 value)
         return true;
     }
 
-    HbIndexNode* node = m_Nodes;
-    HbIndexNode* parent = NULL;
+    HbBTreeNode* node = m_Nodes;
+    HbBTreeNode* parent = NULL;
     int keyIdx = 0;
 
     for(int depth = 0; depth < m_Depth; ++depth)
@@ -150,28 +156,28 @@ HbIndex::Insert(const s64 key, const s64 value)
         const bool isLeaf = (depth == m_Depth-1);
 
 #if AUTO_DEFRAG
-        if(HbIndexNode::NUM_KEYS == node->m_NumKeys && parent)
+        if(node->IsFull() && parent)
         {
             //If there's room in the left or right sibling
             //then move some items over.
 
-            HbIndexNode* sibling = NULL;
+            HbBTreeNode* sibling = NULL;
             if(keyIdx > 0)
             {
                 //Left sibling
                 sibling = parent->m_Items[keyIdx-1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
+                if(sibling->m_NumKeys < sibling->m_MaxKeys-1)
                 {
                     const int numToMove =
-                        (HbIndexNode::NUM_KEYS - sibling->m_NumKeys) / 2;
+                        (sibling->m_MaxKeys - sibling->m_NumKeys) / 2;
 
                     //Move items over to the left sibling.
                     MergeLeft(parent, keyIdx, numToMove, depth);
 
 #if UB
-                    if(key < parent->m_Keys[keyIdx-1])
+                    if(key.LT(m_KeyType, parent->m_Keys[keyIdx-1]))
 #else
-                    if(key <= parent->m_Keys[keyIdx-1])
+                    if(key.LE(m_KeyType, parent->m_Keys[keyIdx-1]))
 #endif
                     {
                         --keyIdx;
@@ -188,18 +194,18 @@ HbIndex::Insert(const s64 key, const s64 value)
             {
                 //right sibling
                 sibling = parent->m_Items[keyIdx+1].m_Node;
-                if(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1)
+                if(sibling->m_NumKeys < sibling->m_MaxKeys-1)
                 {
                     const int numToMove =
-                        (HbIndexNode::NUM_KEYS - sibling->m_NumKeys) / 2;
+                        (sibling->m_MaxKeys - sibling->m_NumKeys) / 2;
 
                     //Move items over to the right sibling.
                     MergeRight(parent, keyIdx, numToMove, depth);
 
 #if UB
-                    if(key >= parent->m_Keys[keyIdx])
+                    if(key.GE(m_KeyType, parent->m_Keys[keyIdx]))
 #else
-                    if(key > parent->m_Keys[keyIdx])
+                    if(key.GT(m_KeyType, parent->m_Keys[keyIdx]))
 #endif
                     {
                         ++keyIdx;
@@ -214,18 +220,18 @@ HbIndex::Insert(const s64 key, const s64 value)
         }
 #endif  //AUTO_DEFRAG
 
-        if(HbIndexNode::NUM_KEYS == node->m_NumKeys)
+        if(node->IsFull())
         {
             //Split the node.
 
             //Guarantee the splitLoc will always be >= 2;
             //See comments below about numToCopy.
-            hb_static_assert(HbIndexNode::NUM_KEYS >= 4);
+            hb_static_assert(HbBTreeNode::MAX_KEYS >= 4);
 
-            int splitLoc = HbIndexNode::NUM_KEYS / 2;
+            int splitLoc = node->m_NumKeys / 2;
 
-            HbIndexNode* newNode = AllocNode();
-            const int numToCopy = HbIndexNode::NUM_KEYS-splitLoc;
+            HbBTreeNode* newNode = AllocNode();
+            const int numToCopy = node->m_NumKeys-splitLoc;
             hbassert(numToCopy > 0);
 
             if(!parent)
@@ -237,7 +243,7 @@ HbIndex::Insert(const s64 key, const s64 value)
             }
 
             //Make room in the parent for a reference to the new node.
-            hbassert(parent->m_NumKeys <= HbIndexNode::NUM_KEYS);
+            hbassert(parent->m_NumKeys < parent->m_MaxKeys);
             hbMove(&parent->m_Keys[keyIdx+1], &parent->m_Keys[keyIdx], parent->m_NumKeys-keyIdx);
             hbMove(&parent->m_Items[keyIdx+2], &parent->m_Items[keyIdx+1], parent->m_NumKeys-keyIdx);
 
@@ -262,9 +268,9 @@ HbIndex::Insert(const s64 key, const s64 value)
 #endif
 
                 //Insert the new node into the linked list of nodes
-                HbIndexNode* next = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
-                newNode->m_Items[HbIndexNode::NUM_KEYS].m_Node = next;
-                node->m_Items[HbIndexNode::NUM_KEYS].m_Node = newNode;
+                HbBTreeNode* next = node->m_Items[node->m_MaxKeys].m_Node;
+                newNode->m_Items[newNode->m_MaxKeys].m_Node = next;
+                node->m_Items[node->m_MaxKeys].m_Node = newNode;
                 newNode->m_Prev = node;
                 if(next)
                 {
@@ -299,7 +305,7 @@ HbIndex::Insert(const s64 key, const s64 value)
             TrimNode(node, depth);
 #endif
 
-            if(key > parent->m_Keys[keyIdx])
+            if(key.GT(m_KeyType, parent->m_Keys[keyIdx]))
             {
                 node = newNode;
             }
@@ -319,7 +325,7 @@ HbIndex::Insert(const s64 key, const s64 value)
     hbMove(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], node->m_NumKeys-keyIdx);
 
     node->m_Keys[keyIdx] = key;
-    node->m_Items[keyIdx].m_Value = value;
+    node->m_Items[keyIdx].m_Int = value;
     ++node->m_NumKeys;
 
     ++m_Count;
@@ -328,10 +334,10 @@ HbIndex::Insert(const s64 key, const s64 value)
 }
 
 bool
-HbIndex::Delete(const s64 key)
+HbBTree::Delete(const HbKey key)
 {
-    HbIndexNode* node = m_Nodes;
-    HbIndexNode* parent = NULL;
+    HbBTreeNode* node = m_Nodes;
+    HbBTreeNode* parent = NULL;
     int parentKeyIdx = -1;
 
     for(int depth = 0; depth < m_Depth-1; ++depth)
@@ -346,12 +352,12 @@ HbIndex::Delete(const s64 key)
             //In both cases we avoid traversing backwards up the tree to remove
             //empty nodes after removing a leaf.
 
-            HbIndexNode* sibling = NULL;
-            HbIndexNode* leftSibling = parentKeyIdx > 0 ? parent->m_Items[parentKeyIdx-1].m_Node : NULL;
-            HbIndexNode* rightSibling = parentKeyIdx < parent->m_NumKeys ? parent->m_Items[parentKeyIdx+1].m_Node : NULL;
+            HbBTreeNode* sibling = NULL;
+            HbBTreeNode* leftSibling = parentKeyIdx > 0 ? parent->m_Items[parentKeyIdx-1].m_Node : NULL;
+            HbBTreeNode* rightSibling = parentKeyIdx < parent->m_NumKeys ? parent->m_Items[parentKeyIdx+1].m_Node : NULL;
 
             //If combined number of items is less than the maximum then merge with left sibling
-            if(leftSibling && (node->m_NumKeys + leftSibling->m_NumKeys) < HbIndexNode::NUM_KEYS)
+            if(leftSibling && (node->m_NumKeys + leftSibling->m_NumKeys) < leftSibling->m_MaxKeys)
             {
                 //Merge with the left sibling.
                 //Move items from the node with fewer items into the
@@ -373,7 +379,7 @@ HbIndex::Delete(const s64 key)
                 MergeRight(parent, parentKeyIdx-1, 1, depth);
             }
             //If combined number of items is less than the maximum then merge with right sibling
-            else if(rightSibling && (node->m_NumKeys + rightSibling->m_NumKeys) < HbIndexNode::NUM_KEYS)
+            else if(rightSibling && (node->m_NumKeys + rightSibling->m_NumKeys) < rightSibling->m_MaxKeys)
             {
                 //Merge with the right sibling
                 //Move items from the node with fewer items into the
@@ -437,7 +443,7 @@ HbIndex::Delete(const s64 key)
 #if UB
         --keyIdx;
 #endif
-        if(key == node->m_Keys[keyIdx])
+        if(key.EQ(m_KeyType, node->m_Keys[keyIdx]))
         {
             if(node->m_NumKeys > 1)
             {
@@ -463,19 +469,19 @@ HbIndex::Delete(const s64 key)
 
                 if(node->m_Prev)
                 {
-                    node->m_Prev->m_Items[HbIndexNode::NUM_KEYS].m_Node =
-                        node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                    node->m_Prev->m_Items[node->m_Prev->m_MaxKeys].m_Node =
+                        node->m_Items[node->m_MaxKeys].m_Node;
                 }
 
-                if(node->m_Items[HbIndexNode::NUM_KEYS].m_Node)
+                if(node->m_Items[node->m_MaxKeys].m_Node)
                 {
-                    node->m_Items[HbIndexNode::NUM_KEYS].m_Node->m_Prev = node->m_Prev;
+                    node->m_Items[node->m_MaxKeys].m_Node->m_Prev = node->m_Prev;
                 }
 
                 if(node == m_Leaves)
                 {
                     //This was the first leaf - replace it with the next leaf
-                    m_Leaves = node->m_Items[HbIndexNode::NUM_KEYS].m_Node;
+                    m_Leaves = node->m_Items[node->m_MaxKeys].m_Node;
                 }
 
                 FreeNode(node);
@@ -510,7 +516,7 @@ HbIndex::Delete(const s64 key)
 
                         hbassert(parent == m_Nodes);
 
-                        HbIndexNode* child;
+                        HbBTreeNode* child;
                         child = (0 == parentKeyIdx)
                                 ? parent->m_Items[1].m_Node
                                 : parent->m_Items[0].m_Node;
@@ -519,11 +525,11 @@ HbIndex::Delete(const s64 key)
                         hbMove(parent->m_Items, child->m_Items, child->m_NumKeys);
                         parent->m_NumKeys = child->m_NumKeys;
 
-                        hbassert(!child->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+                        hbassert(!child->m_Items[child->m_MaxKeys].m_Node);
                         hbassert(!child->m_Prev);
                         hbassert(m_Leaves == child);
 
-                        parent->m_Items[HbIndexNode::NUM_KEYS].m_Node = NULL;
+                        parent->m_Items[parent->m_MaxKeys].m_Node = NULL;
                         m_Leaves = parent;
 
                         FreeNode(child);
@@ -552,15 +558,24 @@ HbIndex::Delete(const s64 key)
     return false;
 }
 
-bool
-HbIndex::Find(const s64 key, s64* value) const
+void
+HbBTree::DeleteAll()
 {
-    const HbIndexNode* node;
-    const HbIndexNode* parent;
+    while(m_Leaves)
+    {
+        Delete(m_Leaves->m_Keys[0]);
+    }
+}
+
+bool
+HbBTree::Find(const HbKey key, s64* value) const
+{
+    const HbBTreeNode* node;
+    const HbBTreeNode* parent;
     int keyIdx, parentKeyIdx;
     if(Find(key, &node, &keyIdx, &parent, &parentKeyIdx))
     {
-        *value = node->m_Items[keyIdx].m_Value;
+        *value = node->m_Items[keyIdx].m_Int;
         return true;
     }
 
@@ -568,7 +583,7 @@ HbIndex::Find(const s64 key, s64* value) const
 }
 
 bool
-HbIndex::GetFirst(HbIterator* it)
+HbBTree::GetFirst(HbIterator* it)
 {
     if(m_Leaves)
     {
@@ -584,19 +599,19 @@ HbIndex::GetFirst(HbIterator* it)
 }
 
 u64
-HbIndex::Count() const
+HbBTree::Count() const
 {
     return m_Count;
 }
 
 double
-HbIndex::GetUtilization() const
+HbBTree::GetUtilization() const
 {
     return (m_Capacity > 0 ) ? (double)m_Count/m_Capacity : 0;
 }
 
 void
-HbIndex::Validate()
+HbBTree::Validate()
 {
     if(m_Nodes)
     {
@@ -604,16 +619,16 @@ HbIndex::Validate()
 
         //Trace down the right edge of the tree and make sure
         //we reach the last node
-        HbIndexNode* node = m_Nodes;
+        HbBTreeNode* node = m_Nodes;
         for(int depth = 0; depth < m_Depth-1; ++depth)
         {
             node = node->m_Items[node->m_NumKeys].m_Node;
         }
 
-        hbassert(!node->m_Items[HbIndexNode::NUM_KEYS].m_Node);
+        hbassert(!node->m_Items[node->m_MaxKeys].m_Node);
 
         unsigned count = 0;
-        for(HbIndexNode* node = m_Leaves; node; node = node->m_Items[HbIndexNode::NUM_KEYS].m_Node)
+        for(HbBTreeNode* node = m_Leaves; node; node = node->m_Items[node->m_MaxKeys].m_Node)
         {
             count += node->m_NumKeys;
         }
@@ -625,30 +640,30 @@ HbIndex::Validate()
 //private:
 
 bool
-HbIndex::Find(const s64 key,
-                const HbIndexNode** outNode,
+HbBTree::Find(const HbKey key,
+                const HbBTreeNode** outNode,
                 int* outKeyIdx,
-                const HbIndexNode** outParent,
+                const HbBTreeNode** outParent,
                 int* outParentKeyIdx) const
 {
-    HbIndexNode* tmpNode;
-    HbIndexNode* tmpParent;
+    HbBTreeNode* tmpNode;
+    HbBTreeNode* tmpParent;
     const bool success =
-        const_cast<HbIndex*>(this)->Find(key, &tmpNode, outKeyIdx, &tmpParent, outParentKeyIdx);
+        const_cast<HbBTree*>(this)->Find(key, &tmpNode, outKeyIdx, &tmpParent, outParentKeyIdx);
     *outNode = tmpNode;
     *outParent = tmpParent;
     return success;
 }
 
 bool
-HbIndex::Find(const s64 key,
-                HbIndexNode** outNode,
+HbBTree::Find(const HbKey key,
+                HbBTreeNode** outNode,
                 int* outKeyIdx,
-                HbIndexNode** outParent,
+                HbBTreeNode** outParent,
                 int* outParentKeyIdx)
 {
-    HbIndexNode* node = m_Nodes;
-    HbIndexNode* parent = NULL;
+    HbBTreeNode* node = m_Nodes;
+    HbBTreeNode* parent = NULL;
     int keyIdx = -1;
     int parentKeyIdx = -1;
 
@@ -663,44 +678,47 @@ HbIndex::Find(const s64 key,
         }
     }
 
+    hbassert(keyIdx <= node->m_NumKeys);
+
+    bool found;
+
 #if UB
-    if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
+    if(keyIdx > 0)
 #else
-    if(keyIdx >= 0 && keyIdx < node->m_NumKeys)
+    if(keyIdx >= 0)
 #endif
     {
 #if UB
         --keyIdx;
 #endif
-        if(key == node->m_Keys[keyIdx])
-        {
-            *outNode = node;
-            *outParent = parent;
-            *outKeyIdx = keyIdx;
-            *outParentKeyIdx = parentKeyIdx;
-            return true;
-        }
+        found = key.EQ(m_KeyType, node->m_Keys[keyIdx]);
+    }
+    else
+    {
+        found = false;
     }
 
-    *outNode = *outParent = NULL;
-    *outKeyIdx = *outParentKeyIdx = -1;
-    return false;
+    *outNode = node;
+    *outParent = parent;
+    *outKeyIdx = keyIdx;
+    *outParentKeyIdx = parentKeyIdx;
+    return found;
 }
 
 void
-HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
+HbBTree::MergeLeft(HbBTreeNode* parent, const int keyIdx, const int count, const int depth)
 {
     hbassert(keyIdx > 0);
 
-    HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
+    HbBTreeNode* node = parent->m_Items[keyIdx].m_Node;
     //Left sibling
-    HbIndexNode* sibling = parent->m_Items[keyIdx-1].m_Node;
+    HbBTreeNode* sibling = parent->m_Items[keyIdx-1].m_Node;
     hbassert(node->m_NumKeys >= count);
-    hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+    hbassert(!sibling->IsFull());
 
     if(node->m_NumKeys == count)
     {
-        if(!hbverify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        if(!hbverify(sibling->m_NumKeys < sibling->m_MaxKeys-1))
         {
             return;
         }
@@ -732,7 +750,7 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 
         if(0 == node->m_NumKeys)
         {
-            hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+            hbassert(!sibling->IsFull());
 
             sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
             sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
@@ -774,7 +792,7 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
     {
         hbassert(parent == m_Nodes);
 
-        HbIndexNode* child = parent->m_Items[0].m_Node;
+        HbBTreeNode* child = parent->m_Items[0].m_Node;
         hbMove(parent->m_Keys, child->m_Keys, child->m_NumKeys);
         if(isLeaf)
         {
@@ -800,19 +818,19 @@ HbIndex::MergeLeft(HbIndexNode* parent, const int keyIdx, const int count, const
 }
 
 void
-HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, const int depth)
+HbBTree::MergeRight(HbBTreeNode* parent, const int keyIdx, const int count, const int depth)
 {
     hbassert(keyIdx < parent->m_NumKeys);
 
-    HbIndexNode* node = parent->m_Items[keyIdx].m_Node;
+    HbBTreeNode* node = parent->m_Items[keyIdx].m_Node;
     //Right sibling
-    HbIndexNode* sibling = parent->m_Items[keyIdx+1].m_Node;
+    HbBTreeNode* sibling = parent->m_Items[keyIdx+1].m_Node;
     hbassert(node->m_NumKeys >= count);
-    hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+    hbassert(!sibling->IsFull());
 
     if(node->m_NumKeys == count)
     {
-        if(!hbverify(sibling->m_NumKeys < HbIndexNode::NUM_KEYS-1))
+        if(!hbverify(sibling->m_NumKeys < sibling->m_MaxKeys-1))
         {
             return;
         }
@@ -852,7 +870,7 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
 
         if(0 == node->m_NumKeys)
         {
-            hbassert(sibling->m_NumKeys < HbIndexNode::NUM_KEYS);
+            hbassert(!sibling->IsFull());
 
             hbMove(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
             hbMove(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
@@ -897,7 +915,7 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
     {
         hbassert(parent == m_Nodes);
 
-        HbIndexNode* child = parent->m_Items[0].m_Node;
+        HbBTreeNode* child = parent->m_Items[0].m_Node;
         hbMove(parent->m_Keys, child->m_Keys, child->m_NumKeys);
         if(isLeaf)
         {
@@ -923,27 +941,27 @@ HbIndex::MergeRight(HbIndexNode* parent, const int keyIdx, const int count, cons
 }
 
 void
-HbIndex::TrimNode(HbIndexNode* node, const int depth)
+HbBTree::TrimNode(HbBTreeNode* node, const int depth)
 {
     const bool isLeaf = (depth == m_Depth-1);
 
-    for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+    for(int i = node->m_NumKeys; i < node->m_MaxKeys; ++i)
     {
-        node->m_Keys[i] = 0;
+        node->m_Keys[i].m_Int = 0;
     }
 
     if(!isLeaf)
     {
-        for(int i = node->m_NumKeys+1; i < HbIndexNode::NUM_KEYS+1; ++i)
+        for(int i = node->m_NumKeys+1; i < node->m_MaxKeys+1; ++i)
         {
-            node->m_Items[i].m_Value = 0;
+            node->m_Items[i].m_Int = 0;
         }
     }
     else
     {
-        for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+        for(int i = node->m_NumKeys; i < node->m_MaxKeys; ++i)
         {
-            node->m_Items[i].m_Value = 0;
+            node->m_Items[i].m_Int = 0;
         }
     }
 }
@@ -952,14 +970,14 @@ HbIndex::TrimNode(HbIndexNode* node, const int depth)
 
 #if !HB_ASSERT
 void
-HbIndex::ValidateNode(const int /*depth*/, HbIndexNode* /*node*/)
+HbBTree::ValidateNode(const int /*depth*/, HbBTreeNode* /*node*/)
 {
 }
 
 #else
 
 void
-HbIndex::ValidateNode(const int depth, HbIndexNode* node)
+HbBTree::ValidateNode(const int depth, HbBTreeNode* node)
 {
     const bool isLeaf = ((m_Depth-1) == depth);
 
@@ -968,9 +986,9 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         for(int i = 1; i < node->m_NumKeys; ++i)
         {
 #if ALLOW_DUPS
-            hbassert(node->m_Keys[i] >= node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i].GE(m_KeyType, node->m_Keys[i-1]));
 #else
-            hbassert(node->m_Keys[i] > node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i].GT(m_KeyType, node->m_Keys[i-1]));
 #endif
         }
     }
@@ -979,15 +997,15 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         //Allow duplicates in the leaves
         for(int i = 1; i < node->m_NumKeys; ++i)
         {
-            hbassert(node->m_Keys[i] >= node->m_Keys[i-1]);
+            hbassert(node->m_Keys[i].GE(m_KeyType, node->m_Keys[i-1]));
         }
     }
 
 #if TRIM_NODE
-    for(int i = node->m_NumKeys; i < HbIndexNode::NUM_KEYS; ++i)
+    for(int i = node->m_NumKeys; i < node->m_MaxKeys; ++i)
     {
         hbassert(0 == node->m_Keys[i]);
-        hbassert(node->m_Items[i].m_Node != node->m_Items[HbIndexNode::NUM_KEYS].m_Node
+        hbassert(node->m_Items[i].m_Node != node->m_Items[node->m_MaxKeys].m_Node
                 || 0 == node->m_Items[i].m_Node);
     }
 #endif
@@ -997,14 +1015,14 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         //Make sure all the keys in the child are <= the current key.
         for(int i = 0; i < node->m_NumKeys; ++i)
         {
-            const s64 key = node->m_Keys[i];
-            const HbIndexNode* child = node->m_Items[i].m_Node;
+            const HbKey key = node->m_Keys[i];
+            const HbBTreeNode* child = node->m_Items[i].m_Node;
             for(int j = 0; j < child->m_NumKeys; ++j)
             {
 #if ALLOW_DUPS
-                hbassert(child->m_Keys[j] <= key);
+                hbassert(child->m_Keys[j].LE(m_KeyType, key));
 #else
-                hbassert(child->m_Keys[j] < key);
+                hbassert(child->m_Keys[j].LT(m_KeyType, key));
 #endif
             }
 
@@ -1014,7 +1032,7 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
                 //If the right sibling's first key is the child's last key plus 1
                 //then make sure the parent's key is equal to the child's last key
                 //because the child's keys must be <= the parent's key
-                const HbIndexNode* nextChild = node->m_Items[i+1].m_Node;
+                const HbBTreeNode* nextChild = node->m_Items[i+1].m_Node;
                 if(child->m_Keys[child->m_NumKeys-1]+1 == nextChild->m_Keys[0])
                 {
                     hbassert(node->m_Keys[i] == child->m_Keys[child->m_NumKeys-1]);
@@ -1024,19 +1042,19 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
         }
 
         //Make sure all the keys in the right sibling are >= keys in the left sibling.
-        const s64 key = node->m_Keys[node->m_NumKeys-1];
-        const HbIndexNode* rightSibling = node->m_Items[node->m_NumKeys].m_Node;
+        const HbKey key = node->m_Keys[node->m_NumKeys-1];
+        const HbBTreeNode* rightSibling = node->m_Items[node->m_NumKeys].m_Node;
         for(int j = 0; j < rightSibling->m_NumKeys; ++j)
         {
-            hbassert(rightSibling->m_Keys[j] >= key);
+            hbassert(rightSibling->m_Keys[j].GE(m_KeyType, key));
         }
 
         /*for(int i = 0; i < node->m_NumKeys; ++i)
         {
             //Make sure we haven't split duplicates
-            const HbIndexNode* a = node->m_Items[i].m_Node;
-            const HbIndexNode* b = node->m_Items[i+1].m_Node;
-            if(a->m_NumKeys < HbIndexNode::NUM_KEYS)
+            const HbBTreeNode* a = node->m_Items[i].m_Node;
+            const HbBTreeNode* b = node->m_Items[i+1].m_Node;
+            if(a->m_NumKeys < a->m_MaxKeys)
             {
                 hbassert(a->m_Keys[a->m_NumKeys-1] != b->m_Keys[0]);
             }
@@ -1051,30 +1069,31 @@ HbIndex::ValidateNode(const int depth, HbIndexNode* node)
 
 #endif  //HB_ASSERT
 
-HbIndexNode*
-HbIndex::AllocNode()
+HbBTreeNode*
+HbBTree::AllocNode()
 {
-    HbIndexNode* node = new HbIndexNode();
+    HbBTreeNode* node = (HbBTreeNode*)HbHeap::ZAlloc(sizeof(HbBTreeNode));
     if(node)
     {
-        m_Capacity += HbIndexNode::NUM_KEYS+1;
+        const_cast<int&>(node->m_MaxKeys) = HbBTreeNode::MAX_KEYS;
+        m_Capacity += node->m_MaxKeys+1;
     }
 
     return node;
 }
 
 void
-HbIndex::FreeNode(HbIndexNode* node)
+HbBTree::FreeNode(HbBTreeNode* node)
 {
     if(node)
     {
-        m_Capacity -= HbIndexNode::NUM_KEYS+1;
-        delete node;
+        m_Capacity -= node->m_MaxKeys+1;
+        HbHeap::Free(node);
     }
 }
 
 int
-HbIndex::Bound(const s64 key, const s64* first, const s64* end)
+HbBTree::Bound(const HbKey key, const HbKey* first, const HbKey* end)
 {
 #if UB
     return UpperBound(key, first, end);
@@ -1084,18 +1103,18 @@ HbIndex::Bound(const s64 key, const s64* first, const s64* end)
 }
 
 int
-HbIndex::LowerBound(const s64 key, const s64* first, const s64* end)
+HbBTree::LowerBound(const HbKey key, const HbKey* first, const HbKey* end)
 {
     if(end > first)
     {
-        const s64* cur = first;
+        const HbKey* cur = first;
         size_t count = end - first;
         while(count > 0)
         {
-            const s64* item = cur;
+            const HbKey* item = cur;
             size_t step = count >> 1;
             item += step;
-            if(*item < key)
+            if(item->m_Int < key.m_Int)
             {
                 cur = ++item;
                 count -= step + 1;
@@ -1113,18 +1132,18 @@ HbIndex::LowerBound(const s64 key, const s64* first, const s64* end)
 }
 
 int
-HbIndex::UpperBound(const s64 key, const s64* first, const s64* end)
+HbBTree::UpperBound(const HbKey key, const HbKey* first, const HbKey* end)
 {
     if(end > first)
     {
-        const s64* cur = first;
+        const HbKey* cur = first;
         size_t count = end - first;
         while(count > 0)
         {
-            const s64* item = cur;
+            const HbKey* item = cur;
             size_t step = count >> 1;
             item += step;
-            if(!(key < *item))
+            if(!(key.m_Int < item->m_Int))
             {
                 cur = ++item;
                 count -= step + 1;
@@ -1142,7 +1161,7 @@ HbIndex::UpperBound(const s64 key, const s64* first, const s64* end)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbIndexTest
+//  HbBTreeTest
 ///////////////////////////////////////////////////////////////////////////////
 
 static ptrdiff_t myrandom (ptrdiff_t i)
@@ -1151,13 +1170,13 @@ static ptrdiff_t myrandom (ptrdiff_t i)
 }
 
 void
-HbIndexTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
+HbBTreeTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
 {
     if(unique)
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            kv[i].m_Key = i;
+            kv[i].m_Key.m_Int = i;
         }
         std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
     }
@@ -1165,15 +1184,15 @@ HbIndexTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, cons
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            kv[i].m_Key = HbRand() % range;
+            kv[i].m_Key.m_Int = HbRand() % range;
         }
     }
 }
 
 void
-HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
+HbBTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbIndex index;
+    HbBTree* btree = HbBTree::Create();
     HB_ASSERTONLY(s64 value);
 
     HbStopWatch sw;
@@ -1185,8 +1204,8 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
-        index.Insert(kv[i].m_Key, kv[i].m_Value);
-        hbassert(index.Find(kv[i].m_Key, &value));
+        btree->Insert(kv[i].m_Key, kv[i].m_Value);
+        hbassert(btree->Find(kv[i].m_Key, &value));
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
@@ -1203,7 +1222,7 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbassert(index.Find(kv[i].m_Key, &value));
+        hbassert(btree->Find(kv[i].m_Key, &value));
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
@@ -1212,33 +1231,38 @@ HbIndexTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     sw.Stop();
     s_Log.Debug("find: %f", sw.GetElapsed());
 
-    s_Log.Debug("utilization: %f", index.GetUtilization());
+    s_Log.Debug("utilization: %f", btree->GetUtilization());
 
     /*std::sort(&kv[0], &kv[numKeys]);
 
     for(int i = 0; i < numKeys; ++i)
     {
-        hbassert(index.Find(kv[i].m_Key, &value));
+        hbassert(btree->Find(kv[i].m_Key, &value));
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
         }
     }*/
 
+    sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbverify(index.Delete(kv[i].m_Key));
-        //index.Validate();
+        hbverify(btree->Delete(kv[i].m_Key));
+        //btree.Validate();
     }
+    sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
 
     //index.Validate();
     delete [] kv;
+
+    HbBTree::Destroy(btree);
 }
 
 void
-HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
+HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbIndex index;
+    HbBTree* btree = HbBTree::Create();
     HB_ASSERTONLY(s64 value);
 
     KV* kv = new KV[numKeys];
@@ -1253,10 +1277,10 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         int idx = HbRand() % numKeys;
         if(!kv[idx].m_Added)
         {
-            index.Insert(kv[idx].m_Key, kv[idx].m_Value);
+            btree->Insert(kv[idx].m_Key, kv[idx].m_Value);
             //index.Validate();
             kv[idx].m_Added = true;
-            hbassert(index.Find(kv[idx].m_Key, &value));
+            hbassert(btree->Find(kv[idx].m_Key, &value));
             if(unique)
             {
                 hbassert(value == kv[idx].m_Value);
@@ -1264,10 +1288,10 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         }
         else
         {
-            hbverify(index.Delete(kv[idx].m_Key));
+            hbverify(btree->Delete(kv[idx].m_Key));
             //index.Validate();
             kv[idx].m_Added = false;
-            hbassert(!index.Find(kv[idx].m_Key, &value));
+            hbassert(!btree->Find(kv[idx].m_Key, &value));
         }
     }
 
@@ -1277,7 +1301,7 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
     {
         if(kv[i].m_Added)
         {
-            hbassert(index.Find(kv[i].m_Key, &value));
+            hbassert(btree->Find(kv[i].m_Key, &value));
             if(unique)
             {
                 hbassert(value == kv[i].m_Value);
@@ -1285,21 +1309,26 @@ HbIndexTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         }
         else
         {
-            hbassert(!index.Find(kv[i].m_Key, &value));
+            hbassert(!btree->Find(kv[i].m_Key, &value));
         }
     }
 
-    //index.DumpStats();
+    //btree.DumpStats();
 
-    //index.Validate();
+    //btree.Validate();
 
-    //index.Dump(true);
+    //btree.Dump(true);
+
+    HbBTree::Destroy(btree);
 }
 
 void
-HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending)
+HbBTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending)
 {
-    HbIndex index;
+    HbBTree* btree = HbBTree::Create();
+    HB_ASSERTONLY(s64 value);
+
+    HbStopWatch sw;
 
     KV* kv = new KV[numKeys];
     CreateRandomKeys(kv, numKeys, unique, range);
@@ -1308,7 +1337,7 @@ HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range
         kv[i].m_Value = i;
         if(!ascending)
         {
-            kv[i].m_Key = -kv[i].m_Key;
+            kv[i].m_Key.m_Int = -kv[i].m_Key.m_Int;
         }
     }
 
@@ -1316,65 +1345,117 @@ HbIndexTest::AddSortedKeys(const int numKeys, const bool unique, const int range
 
     for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Key = -kv[i].m_Key;
-        index.Insert(kv[i].m_Key, kv[i].m_Value);
+        kv[i].m_Key.m_Int = -kv[i].m_Key.m_Int;
     }
 
-    index.Validate();
-
-    int count = 0;
-    HbIterator it;
-    for(bool b = index.GetFirst(&it); b; b = it.Next())
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
     {
-        ++count;
+        kv[i].m_Value = i;
+        btree->Insert(kv[i].m_Key, kv[i].m_Value);
+        hbassert(btree->Find(kv[i].m_Key, &value));
+        if(unique)
+        {
+            hbassert(value == kv[i].m_Value);
+        }
+        //index.Validate();
     }
-    hbassert(count == numKeys);
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
+
+    //index.Validate();
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbassert(btree->Find(kv[i].m_Key, &value));
+        if(unique)
+        {
+            hbassert(value == kv[i].m_Value);
+        }
+    }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+
+    s_Log.Debug("utilization: %f", btree->GetUtilization());
+
+    /*std::sort(&kv[0], &kv[numKeys]);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbassert(btree.Find(kv[i].m_Key, &value));
+        if(unique)
+        {
+            hbassert(value == kv[i].m_Value);
+        }
+    }*/
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbverify(btree->Delete(kv[i].m_Key));
+        //btree.Validate();
+    }
+    sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
+
+    //index.Validate();
+    delete [] kv;
+
+    HbBTree::Destroy(btree);
 }
 
 void
-HbIndexTest::AddDups(const int numKeys, const int min, const int max)
+HbBTreeTest::AddDups(const int numKeys, const int min, const int max)
 {
-    HbIndex index;
+    HbBTree* btree = HbBTree::Create();
     int range = max - min;
     if(0 == range)
     {
+        HbKey key;
+        key.m_Int = min;
         for(int i = 0; i < numKeys; ++i)
         {
-            index.Insert(min, i);
+            btree->Insert(key, i);
         }
     }
     else
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            index.Insert((i%range)+min, i);
+            HbKey key;
+            key.m_Int = (i%range)+min;
+            btree->Insert(key, i);
         }
     }
 
-    index.Validate();
+    btree->Validate();
 
     if(0 == range)
     {
+        HbKey key;
+        key.m_Int = min;
         for(int i = 0; i < numKeys; ++i)
         {
-            hbverify(index.Delete(min));
+            hbverify(btree->Delete(key));
         }
     }
     else
     {
-        static int iii;
         for(int i = 0; i < numKeys; ++i)
         {
-            if(19==i)
-            {
-                iii = 0;
-            }
-            hbverify(index.Delete((i%range)+min));
-            index.Validate();
+            HbKey key;
+            key.m_Int = (i%range)+min;
+            hbverify(btree->Delete(key));
+            btree->Validate();
         }
     }
 
-    index.Validate();
+    btree->Validate();
 
-    hbassert(0 == index.Count());
+    hbassert(0 == btree->Count());
+
+    HbBTree::Destroy(btree);
 }

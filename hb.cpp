@@ -249,21 +249,39 @@ HbString::Dup() const
     return Dup(this);
 }
 
-bool
-HbString::EQ(const HbString* that) const
+int
+HbString::Compare(const byte* thatData, const size_t thatLen) const
 {
-    const size_t mysize = Size();
-    return (that->Size() == mysize
-            && (0 == mysize || 0 == memcmp(this, that, mysize)));
-}
-
-bool
-HbString::EQ(const byte* string, const size_t stringLen) const
-{
-    const byte* data;
-    const size_t mylen = GetData(&data);
-    return (stringLen == mylen
-            && (0 == mylen || 0 == memcmp(data, string, mylen)));
+    const byte* myData;
+    const size_t myLen = GetData(&myData);
+    if(myLen < thatLen)
+    {
+        if(myLen > 0)
+        {
+            const int result = memcmp(myData, thatData, myLen);
+            return (0 == result) ? -1 : result;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+    else if(thatLen < myLen)
+    {
+        if(thatLen > 0)
+        {
+            const int result = memcmp(myData, thatData, thatLen);
+            return (0 == result) ? -1 : result;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+    else
+    {
+        return myLen > 0 ? memcmp(myData, thatData, myLen): 0;
+    }
 }
 
 //proteted:
