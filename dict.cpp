@@ -62,7 +62,7 @@ HbDictItem::Create(const HbString* key, const HbString* value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_STRING;
+        item->m_KeyType = HB_KEYTYPE_STRING;
         item->m_ValType = HB_VALUETYPE_STRING;
 
         if(NULL == (item->m_Key.m_String = key->Dup())
@@ -82,7 +82,7 @@ HbDictItem::Create(const HbString* key, const s64 value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_STRING;
+        item->m_KeyType = HB_KEYTYPE_STRING;
         item->m_ValType = HB_VALUETYPE_INT;
         item->m_Value.m_Int = value;
 
@@ -102,7 +102,7 @@ HbDictItem::Create(const HbString* key, const double value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_STRING;
+        item->m_KeyType = HB_KEYTYPE_STRING;
         item->m_ValType = HB_VALUETYPE_DOUBLE;
         item->m_Value.m_Double = value;
 
@@ -122,7 +122,7 @@ HbDictItem::Create(const s64 key, const HbString* value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_INT;
+        item->m_KeyType = HB_KEYTYPE_INT;
         item->m_ValType = HB_VALUETYPE_STRING;
         item->m_Key.m_Int = key;
 
@@ -142,7 +142,7 @@ HbDictItem::Create(const s64 key, const s64 value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_INT;
+        item->m_KeyType = HB_KEYTYPE_INT;
         item->m_ValType = HB_VALUETYPE_INT;
         item->m_Key.m_Int = key;
         item->m_Value.m_Int = value;
@@ -157,7 +157,7 @@ HbDictItem::Create(const s64 key, const double value)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_INT;
+        item->m_KeyType = HB_KEYTYPE_INT;
         item->m_ValType = HB_VALUETYPE_DOUBLE;
         item->m_Key.m_Int = key;
         item->m_Value.m_Double = value;
@@ -172,7 +172,7 @@ HbDictItem::CreateEmpty(const HbString* key, const size_t len)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_STRING;
+        item->m_KeyType = HB_KEYTYPE_STRING;
         item->m_ValType = HB_VALUETYPE_STRING;
 
         if(NULL == (item->m_Key.m_String = key->Dup())
@@ -192,7 +192,7 @@ HbDictItem::CreateEmpty(const s64 key, const size_t len)
     HbDictItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_VALUETYPE_INT;
+        item->m_KeyType = HB_KEYTYPE_INT;
         item->m_ValType = HB_VALUETYPE_STRING;
         item->m_Key.m_Int = key;
 
@@ -247,7 +247,7 @@ HbDictItem::Create()
 
 HbDictItem::HbDictItem()
     : m_Next(0)
-    , m_KeyType(HB_VALUETYPE_INVALID)
+    , m_KeyType(HB_KEYTYPE_INVALID)
     , m_ValType(HB_VALUETYPE_INVALID)
 {
 }
@@ -1036,7 +1036,8 @@ HbDictTest::AddRandomKeys(const int numKeys)
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
-        if(hbverify(dict->Set(kv[i].m_Key, (s64)kv[i].m_Value)))
+        const bool added = dict->Set(kv[i].m_Key, (s64)kv[i].m_Value);
+        if(added)
         {
             hbverify(dict->Find(kv[i].m_Key, &value));
             hbverify(value == kv[i].m_Value);
@@ -1050,7 +1051,8 @@ HbDictTest::AddRandomKeys(const int numKeys)
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbverify(dict->Find(kv[i].m_Key, &value));
+        const bool found = dict->Find(kv[i].m_Key, &value);
+        hbassert(found);
         hbverify(value == kv[i].m_Value);
     }
     sw.Stop();
@@ -1069,7 +1071,8 @@ HbDictTest::AddRandomKeys(const int numKeys)
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbverify(dict->Clear(kv[i].m_Key));
+        const bool cleared =dict->Clear(kv[i].m_Key);
+        hbassert(cleared);
     }
     sw.Stop();
     s_Log.Debug("delete: %f", sw.GetElapsed());
@@ -1095,7 +1098,8 @@ HbDictTest::AddDeleteRandomKeys(const int numKeys)
         int idx = HbRand() % numKeys;
         if(!kv[idx].m_Added)
         {
-            if(hbverify(dict->Set(kv[i].m_Key, (s64)kv[i].m_Value)))
+            const bool added = dict->Set(kv[i].m_Key, (s64)kv[i].m_Value);
+            if(added)
             {
                 kv[idx].m_Added = true;
                 hbverify(dict->Find(kv[idx].m_Key, &value));
@@ -1104,7 +1108,8 @@ HbDictTest::AddDeleteRandomKeys(const int numKeys)
         }
         else
         {
-            hbverify(dict->Clear(kv[idx].m_Key));
+            const bool cleared = dict->Clear(kv[idx].m_Key);
+            hbassert(cleared);
             kv[idx].m_Added = false;
             hbverify(!dict->Find(kv[idx].m_Key, &value));
         }
@@ -1114,12 +1119,14 @@ HbDictTest::AddDeleteRandomKeys(const int numKeys)
     {
         if(kv[i].m_Added)
         {
-            hbverify(dict->Find(kv[i].m_Key, &value));
+            const bool found = dict->Find(kv[i].m_Key, &value);
+            hbassert(found);
             hbverify(value == kv[i].m_Value);
         }
         else
         {
-            hbverify(!dict->Find(kv[i].m_Key, &value));
+            const bool found = dict->Find(kv[i].m_Key, &value);
+            hbassert(!found);
         }
     }
 

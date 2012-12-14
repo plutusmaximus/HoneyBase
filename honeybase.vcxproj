@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{C5E367AE-1793-43B3-8CB2-03E3A99C3378}</ProjectGuid>
+    <ProjectGuid>{B9C646BF-A7FA-46AC-8FF6-1357CD47F32D}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>honeybase</RootNamespace>
   </PropertyGroup>
@@ -47,10 +47,9 @@
     <ClCompile>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <WarningLevel>Level4</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <TreatWarningAsError>true</TreatWarningAsError>
       <ExceptionHandling>false</ExceptionHandling>
     </ClCompile>
     <Link>
@@ -60,14 +59,13 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <WarningLevel>Level4</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <TreatWarningAsError>true</TreatWarningAsError>
       <ExceptionHandling>false</ExceptionHandling>
     </ClCompile>
     <Link>
@@ -82,7 +80,7 @@
     <ClCompile Include="dict.cpp" />
     <ClCompile Include="hb.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="record.cpp" />
+    <ClCompile Include="memfile.cpp" />
     <ClCompile Include="skiplist.cpp" />
   </ItemGroup>
   <ItemGroup>

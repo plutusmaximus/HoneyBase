@@ -54,6 +54,20 @@ typedef u8          byte;
 unsigned HbRand();
 unsigned HbRand(const unsigned min, const unsigned max);
 
+template<typename T, int BITSIZE, int ARRAYSIZE>
+class HbBitFieldArray
+{
+public:
+
+    T& operator[](const int index)
+    {
+        const size_t offset = index*BITSIZE;
+        const byte b = m_Bits[offset>>3];
+    }
+
+    byte m_Bits[((ARRAYSIZE * BITSIZE) + BITSIZE - 1) / 8];
+};
+
 enum HbKeyType
 {
     HB_KEYTYPE_INVALID,
@@ -166,6 +180,8 @@ protected:
 
 private:
 
+    byte bytes[1];
+
     HbString(){};
     ~HbString(){}
     HbString(const HbString&);
@@ -181,6 +197,21 @@ public:
         double m_Double;
         HbString* m_String;
     };
+
+    void Set(const s64 value)
+    {
+        m_Int = value;
+    }
+
+    void Set(const double value)
+    {
+        m_Double = value;
+    }
+
+    void Set(const HbString* value)
+    {
+        m_String = value->Dup();
+    }
 
     int Compare(const HbKeyType keyType, const HbKey& that) const
     {
@@ -265,24 +296,6 @@ public:
 	static void* ZAlloc(size_t size);
 
 	static void Free(void* mem);
-};
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbFixedString32
-///////////////////////////////////////////////////////////////////////////////
-class HbFixedString32 : HbString
-{
-public:
-
-    explicit HbFixedString32(const byte* string, const size_t stringLen);
-
-    ~HbFixedString32();
-
-private:
-
-    HbFixedString32();
-
-    byte m_Buf[32];
 };
 
 class HbStringTest

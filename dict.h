@@ -18,11 +18,11 @@ private:
     static HbDictItem* CreateEmpty(const s64 key, const size_t len);
     static void Destroy(HbDictItem* item);
 
-    HbValue m_Key;
+    HbKey m_Key;
     HbValue m_Value;
     HbDictItem* m_Next;
 
-    HbValueType m_KeyType : 4;
+    HbKeyType m_KeyType : 4;
     HbValueType m_ValType : 4;
 
 private:

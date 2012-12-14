@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "btree.h"
 
 #include <algorithm>
@@ -75,10 +76,10 @@ HbIterator::Next()
     return (NULL != m_Cur);
 }
 
-s64
+HbKey
 HbIterator::GetKey()
 {
-    return m_Cur->m_Keys[m_ItemIndex].m_Int;
+    return m_Cur->m_Keys[m_ItemIndex];
 }
 
 s64
@@ -93,23 +94,23 @@ HbIterator::GetValue()
 #define TRIM_NODE   0
 #define AUTO_DEFRAG 1
 
-HbBTree::HbBTree()
+HbBTree::HbBTree(const HbKeyType keyType)
 : m_Nodes(NULL)
 , m_Leaves(NULL)
 , m_Count(0)
 , m_Capacity(0)
 , m_Depth(0)
-, m_KeyType(HB_KEYTYPE_INT)
+, m_KeyType(keyType)
 {
 }
 
 HbBTree*
-HbBTree::Create()
+HbBTree::Create(const HbKeyType keyType)
 {
     HbBTree* btree = (HbBTree*) HbHeap::ZAlloc(sizeof(HbBTree));
     if(btree)
     {
-        new (btree) HbBTree();
+        new (btree) HbBTree(keyType);
     }
 
     return btree;
@@ -130,7 +131,7 @@ HbBTree::Insert(const HbKey key, const s64 value)
 {
     if(!m_Nodes)
     {
-        m_Nodes = m_Leaves = AllocNode();
+        m_Nodes = m_Leaves = AllocNode(HbBTreeNode::MAX_KEYS);
         if(!m_Nodes)
         {
             return false;
@@ -228,15 +229,15 @@ HbBTree::Insert(const HbKey key, const s64 value)
             //See comments below about numToCopy.
             hb_static_assert(HbBTreeNode::MAX_KEYS >= 4);
 
-            int splitLoc = node->m_NumKeys / 2;
+            const int splitLoc = node->m_NumKeys / 2;
 
-            HbBTreeNode* newNode = AllocNode();
             const int numToCopy = node->m_NumKeys-splitLoc;
             hbassert(numToCopy > 0);
+            HbBTreeNode* newNode = AllocNode(HbBTreeNode::MAX_KEYS);
 
             if(!parent)
             {
-                parent = m_Nodes = AllocNode();
+                parent = m_Nodes = AllocNode(HbBTreeNode::MAX_KEYS);
                 parent->m_Items[0].m_Node = node;
                 ++m_Depth;
                 ++depth;
@@ -311,7 +312,7 @@ HbBTree::Insert(const HbKey key, const s64 value)
             }
         }
 
-        keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         hbassert(keyIdx >= 0);
 
         if(!isLeaf)
@@ -327,6 +328,8 @@ HbBTree::Insert(const HbKey key, const s64 value)
     node->m_Keys[keyIdx] = key;
     node->m_Items[keyIdx].m_Int = value;
     ++node->m_NumKeys;
+
+    hbassert(node->m_NumKeys <= node->m_MaxKeys);
 
     ++m_Count;
 
@@ -427,12 +430,12 @@ HbBTree::Delete(const HbKey key)
             }
         }
 
-        parentKeyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        parentKeyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         parent = node;
         node = parent->m_Items[parentKeyIdx].m_Node;
     }
 
-    int keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+    int keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
 
 #if UB
     if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
@@ -669,7 +672,7 @@ HbBTree::Find(const HbKey key,
 
     for(int depth = 0; depth < m_Depth; ++depth)
     {
-        keyIdx = Bound(key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
         if(depth < m_Depth-1)
         {
             parent = node;
@@ -947,7 +950,7 @@ HbBTree::TrimNode(HbBTreeNode* node, const int depth)
 
     for(int i = node->m_NumKeys; i < node->m_MaxKeys; ++i)
     {
-        node->m_Keys[i].m_Int = 0;
+        node->m_Keys[i].Set(s64(0));
     }
 
     if(!isLeaf)
@@ -966,7 +969,7 @@ HbBTree::TrimNode(HbBTreeNode* node, const int depth)
     }
 }
 
-#define ALLOW_DUPS  1
+#define ALLOW_DUPS  0
 
 #if !HB_ASSERT
 void
@@ -1070,13 +1073,17 @@ HbBTree::ValidateNode(const int depth, HbBTreeNode* node)
 #endif  //HB_ASSERT
 
 HbBTreeNode*
-HbBTree::AllocNode()
+HbBTree::AllocNode(const int numKeys)
 {
-    HbBTreeNode* node = (HbBTreeNode*)HbHeap::ZAlloc(sizeof(HbBTreeNode));
+    const size_t size = sizeof(HbBTreeNode) + (numKeys*(sizeof(HbKey)+sizeof(HbBTreeItem)));
+    HbBTreeNode* node = (HbBTreeNode*)HbHeap::ZAlloc(size);
+    //HbBTreeNode* node = (HbBTreeNode*)HbHeap::ZAlloc(sizeof(HbBTreeNode));
     if(node)
     {
-        const_cast<int&>(node->m_MaxKeys) = HbBTreeNode::MAX_KEYS;
+        const_cast<int&>(node->m_MaxKeys) = numKeys;
         m_Capacity += node->m_MaxKeys+1;
+
+        node->m_Keys = (HbKey*)&node->m_Items[numKeys+1];
     }
 
     return node;
@@ -1093,18 +1100,20 @@ HbBTree::FreeNode(HbBTreeNode* node)
 }
 
 int
-HbBTree::Bound(const HbKey key, const HbKey* first, const HbKey* end)
+HbBTree::Bound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end)
 {
 #if UB
-    return UpperBound(key, first, end);
+    return UpperBound(keyType, key, first, end);
 #else
-    return LowerBound(key, first, end);
+    return LowerBound(keyType, key, first, end);
 #endif
 }
 
 int
-HbBTree::LowerBound(const HbKey key, const HbKey* first, const HbKey* end)
+HbBTree::LowerBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end)
 {
+    //DUPS
+    //if(end >= first)
     if(end > first)
     {
         const HbKey* cur = first;
@@ -1114,7 +1123,7 @@ HbBTree::LowerBound(const HbKey key, const HbKey* first, const HbKey* end)
             const HbKey* item = cur;
             size_t step = count >> 1;
             item += step;
-            if(item->m_Int < key.m_Int)
+            if(item->LT(keyType, key))
             {
                 cur = ++item;
                 count -= step + 1;
@@ -1132,8 +1141,10 @@ HbBTree::LowerBound(const HbKey key, const HbKey* first, const HbKey* end)
 }
 
 int
-HbBTree::UpperBound(const HbKey key, const HbKey* first, const HbKey* end)
+HbBTree::UpperBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end)
 {
+    //DUPS
+    //if(end >= first)
     if(end > first)
     {
         const HbKey* cur = first;
@@ -1143,7 +1154,7 @@ HbBTree::UpperBound(const HbKey key, const HbKey* first, const HbKey* end)
             const HbKey* item = cur;
             size_t step = count >> 1;
             item += step;
-            if(!(key.m_Int < item->m_Int))
+            if(!(key.LT(keyType, *item)))
             {
                 cur = ++item;
                 count -= step + 1;
@@ -1170,13 +1181,14 @@ static ptrdiff_t myrandom (ptrdiff_t i)
 }
 
 void
-HbBTreeTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
+HbBTreeTest::CreateRandomKeys(const HbKeyType keyType, KV* kv, const int numKeys, const bool unique, const int range)
 {
     if(unique)
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            kv[i].m_Key.m_Int = i;
+            kv[i].m_Key.Set(s64(i));
+            kv[i].m_Value = kv[i].m_Key.m_Int;
         }
         std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
     }
@@ -1184,7 +1196,25 @@ HbBTreeTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, cons
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            kv[i].m_Key.m_Int = HbRand() % range;
+            kv[i].m_Key.Set(s64(HbRand() % range));
+            kv[i].m_Value = kv[i].m_Key.m_Int;
+        }
+    }
+
+    if(keyType == HB_KEYTYPE_STRING)
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            char buf[256];
+            snprintf(buf, sizeof(buf)-1, "%d", kv[i].m_Key.m_Int);
+            kv[i].m_Key.m_String = HbString::Create((byte*)buf, strlen(buf));
+        }
+    }
+    else if(keyType == HB_KEYTYPE_DOUBLE)
+    {
+        for(int i = 0; i < numKeys; ++i)
+        {
+            kv[i].m_Key.m_Double = kv[i].m_Key.m_Int / 3.14159;
         }
     }
 }
@@ -1192,41 +1222,51 @@ HbBTreeTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, cons
 void
 HbBTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbBTree* btree = HbBTree::Create();
-    HB_ASSERTONLY(s64 value);
+    HbBTree* btree = HbBTree::Create(HB_KEYTYPE_INT);
+    s64 value;
 
     HbStopWatch sw;
 
     KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
+    CreateRandomKeys(btree->GetKeyType(), kv, numKeys, unique, range);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        kv[i].m_Value = i;
+    }
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Value = i;
-        btree->Insert(kv[i].m_Key, kv[i].m_Value);
+        HB_ASSERTONLY(const bool added =) btree->Insert(kv[i].m_Key, kv[i].m_Value);
+#if HB_ASSERT
+        hbassert(added);
         hbassert(btree->Find(kv[i].m_Key, &value));
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
         }
-        //index.Validate();
+        //btree->Validate();
+#endif
     }
     sw.Stop();
     s_Log.Debug("insert: %f", sw.GetElapsed());
 
-    //index.Validate();
+    btree->Validate();
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbassert(btree->Find(kv[i].m_Key, &value));
+        HB_ASSERTONLY(const bool found =) btree->Find(kv[i].m_Key, &value);
+#if HB_ASSERT
+        hbassert(found);
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
         }
+#endif
     }
     sw.Stop();
     s_Log.Debug("find: %f", sw.GetElapsed());
@@ -1247,13 +1287,14 @@ HbBTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbverify(btree->Delete(kv[i].m_Key));
+        HB_ASSERTONLY(const bool deleted =) btree->Delete(kv[i].m_Key);
+        hbassert(deleted);
         //btree.Validate();
     }
     sw.Stop();
     s_Log.Debug("delete: %f", sw.GetElapsed());
 
-    //index.Validate();
+    btree->Validate();
     delete [] kv;
 
     HbBTree::Destroy(btree);
@@ -1262,11 +1303,11 @@ HbBTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range
 void
 HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbBTree* btree = HbBTree::Create();
-    HB_ASSERTONLY(s64 value);
+    HbBTree* btree = HbBTree::Create(HB_KEYTYPE_INT);
+    s64 value;
 
     KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
+    CreateRandomKeys(btree->GetKeyType(), kv, numKeys, unique, range);
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
@@ -1278,7 +1319,7 @@ HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         if(!kv[idx].m_Added)
         {
             btree->Insert(kv[idx].m_Key, kv[idx].m_Value);
-            //index.Validate();
+            //btree->Validate();
             kv[idx].m_Added = true;
             hbassert(btree->Find(kv[idx].m_Key, &value));
             if(unique)
@@ -1288,20 +1329,22 @@ HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
         }
         else
         {
-            hbverify(btree->Delete(kv[idx].m_Key));
-            //index.Validate();
+            const bool deleted = btree->Delete(kv[idx].m_Key);
+            hbassert(deleted);
+            //btree->Validate();
             kv[idx].m_Added = false;
             hbassert(!btree->Find(kv[idx].m_Key, &value));
         }
     }
 
-//    index.Validate();
+    btree->Validate();
 
     for(int i = 0; i < numKeys; ++i)
     {
         if(kv[i].m_Added)
         {
-            hbassert(btree->Find(kv[i].m_Key, &value));
+            const bool found = btree->Find(kv[i].m_Key, &value);
+            hbassert(found);
             if(unique)
             {
                 hbassert(value == kv[i].m_Value);
@@ -1315,7 +1358,7 @@ HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
 
     //btree.DumpStats();
 
-    //btree.Validate();
+    btree->Validate();
 
     //btree.Dump(true);
 
@@ -1325,19 +1368,19 @@ HbBTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int
 void
 HbBTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending)
 {
-    HbBTree* btree = HbBTree::Create();
-    HB_ASSERTONLY(s64 value);
+    HbBTree* btree = HbBTree::Create(HB_KEYTYPE_INT);
+    s64 value;
 
     HbStopWatch sw;
 
     KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
+    CreateRandomKeys(btree->GetKeyType(), kv, numKeys, unique, range);
     for(int i = 0; i < numKeys; ++i)
     {
         kv[i].m_Value = i;
         if(!ascending)
         {
-            kv[i].m_Key.m_Int = -kv[i].m_Key.m_Int;
+            kv[i].m_Key.Set(s64(-kv[i].m_Key.m_Int));
         }
     }
 
@@ -1345,36 +1388,41 @@ HbBTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range
 
     for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Key.m_Int = -kv[i].m_Key.m_Int;
+        kv[i].m_Key.Set(s64(-kv[i].m_Key.m_Int));
     }
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        kv[i].m_Value = i;
-        btree->Insert(kv[i].m_Key, kv[i].m_Value);
+        HB_ASSERTONLY(const bool added =) btree->Insert(kv[i].m_Key, kv[i].m_Value);
+#if HB_ASSERT
+        hbassert(added);
         hbassert(btree->Find(kv[i].m_Key, &value));
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
         }
-        //index.Validate();
+        //btree->Validate();
+#endif
     }
     sw.Stop();
     s_Log.Debug("insert: %f", sw.GetElapsed());
 
-    //index.Validate();
+    btree->Validate();
 
     std::random_shuffle(&kv[0], &kv[numKeys]);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbassert(btree->Find(kv[i].m_Key, &value));
+        HB_ASSERTONLY(const bool found =) btree->Find(kv[i].m_Key, &value);
+#if HB_ASSERT
+        hbassert(found);
         if(unique)
         {
             hbassert(value == kv[i].m_Value);
         }
+#endif
     }
     sw.Stop();
     s_Log.Debug("find: %f", sw.GetElapsed());
@@ -1395,13 +1443,14 @@ HbBTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
-        hbverify(btree->Delete(kv[i].m_Key));
-        //btree.Validate();
+        HB_ASSERTONLY(const bool deleted =) btree->Delete(kv[i].m_Key);
+        hbassert(deleted);
+        //btree->Validate();
     }
     sw.Stop();
     s_Log.Debug("delete: %f", sw.GetElapsed());
 
-    //index.Validate();
+    btree->Validate();
     delete [] kv;
 
     HbBTree::Destroy(btree);
@@ -1410,12 +1459,12 @@ HbBTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range
 void
 HbBTreeTest::AddDups(const int numKeys, const int min, const int max)
 {
-    HbBTree* btree = HbBTree::Create();
+    HbBTree* btree = HbBTree::Create(HB_KEYTYPE_INT);
     int range = max - min;
     if(0 == range)
     {
         HbKey key;
-        key.m_Int = min;
+        key.Set(s64(min));
         for(int i = 0; i < numKeys; ++i)
         {
             btree->Insert(key, i);
@@ -1426,7 +1475,7 @@ HbBTreeTest::AddDups(const int numKeys, const int min, const int max)
         for(int i = 0; i < numKeys; ++i)
         {
             HbKey key;
-            key.m_Int = (i%range)+min;
+            key.Set(s64((i%range)+min));
             btree->Insert(key, i);
         }
     }
@@ -1436,7 +1485,7 @@ HbBTreeTest::AddDups(const int numKeys, const int min, const int max)
     if(0 == range)
     {
         HbKey key;
-        key.m_Int = min;
+        key.Set(s64(min));
         for(int i = 0; i < numKeys; ++i)
         {
             hbverify(btree->Delete(key));
@@ -1447,7 +1496,7 @@ HbBTreeTest::AddDups(const int numKeys, const int min, const int max)
         for(int i = 0; i < numKeys; ++i)
         {
             HbKey key;
-            key.m_Int = (i%range)+min;
+            key.Set(s64((i%range)+min));
             hbverify(btree->Delete(key));
             btree->Validate();
         }

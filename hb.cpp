@@ -254,6 +254,7 @@ HbString::Compare(const byte* thatData, const size_t thatLen) const
 {
     const byte* myData;
     const size_t myLen = GetData(&myData);
+
     if(myLen < thatLen)
     {
         if(myLen > 0)
@@ -271,11 +272,11 @@ HbString::Compare(const byte* thatData, const size_t thatLen) const
         if(thatLen > 0)
         {
             const int result = memcmp(myData, thatData, thatLen);
-            return (0 == result) ? -1 : result;
+            return (0 == result) ? 1 : result;
         }
         else
         {
-            return -1;
+            return 1;
         }
     }
     else
@@ -284,7 +285,7 @@ HbString::Compare(const byte* thatData, const size_t thatLen) const
     }
 }
 
-//proteted:
+//protected:
 
 void
 HbString::Init(HbString* hbs, const byte* bytes, const size_t stringLen)
@@ -305,16 +306,6 @@ HbString::Init(HbString* hbs, const byte* bytes, const size_t stringLen)
         memcpy(p, bytes, stringLen);
     }
 }
-
-/*///////////////////////////////////////////////////////////////////////////////
-//  HbFixedString32
-///////////////////////////////////////////////////////////////////////////////
-HbFixedString32::HbFixedString32(const byte* string, const size_t stringLen)
-{
-    hbassert(stringLen < 32);
-    const size_t len = (stringLen >= 32) ? 32: stringLen;
-    Init(this, string, len);
-}*/
 
 ///////////////////////////////////////////////////////////////////////////////
 //  HbStringTest

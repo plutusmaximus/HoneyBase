@@ -19,7 +19,7 @@ public:
 
     bool Next();
 
-    s64 GetKey();
+    HbKey GetKey();
     s64 GetValue();
 
 private:
@@ -38,8 +38,6 @@ public:
         HbString* m_String;
         HbBTreeNode* m_Node;
     };
-
-    HbValueType m_Type;
 };
 
 class HbBTreeNode
@@ -53,8 +51,11 @@ public:
     int m_NumKeys;
     const int m_MaxKeys;
 
-    HbKey m_Keys[MAX_KEYS];
-    HbBTreeItem m_Items[MAX_KEYS+1];
+    //FRACNODES
+    HbKey* m_Keys;
+    HbBTreeItem m_Items[1];
+    //HbKey m_Keys[MAX_KEYS];
+    //HbBTreeItem m_Items[MAX_KEYS+1];
 
     inline bool IsFull() const
     {
@@ -72,7 +73,7 @@ class HbBTree
 {
 public:
 
-    static HbBTree* Create();
+    static HbBTree* Create(const HbKeyType keyType);
     static void Destroy(HbBTree* btree);
 
     bool Insert(const HbKey key, const s64 value);
@@ -84,6 +85,11 @@ public:
     bool Find(const HbKey key, s64* value) const;
 
     bool GetFirst(HbIterator* it);
+
+    HbKeyType GetKeyType() const
+    {
+        return m_KeyType;
+    }
 
     u64 Count() const;
 
@@ -111,12 +117,12 @@ private:
 
     void ValidateNode(const int depth, HbBTreeNode* node);
 
-    HbBTreeNode* AllocNode();
+    HbBTreeNode* AllocNode(const int numKeys);
     void FreeNode(HbBTreeNode* node);
 
-    static int Bound(const HbKey key, const HbKey* first, const HbKey* end);
-    static int LowerBound(const HbKey key, const HbKey* first, const HbKey* end);
-    static int UpperBound(const HbKey key, const HbKey* first, const HbKey* end);
+    static int Bound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
+    static int LowerBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
+    static int UpperBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
 
     HbBTreeNode* m_Nodes;
 
@@ -125,8 +131,9 @@ private:
     u64 m_Count;
     u64 m_Capacity;
     int m_Depth;
-    HbKeyType m_KeyType;
+    const HbKeyType m_KeyType;
 
+    explicit HbBTree(const HbKeyType keyType);
     HbBTree();
     ~HbBTree();
     HbBTree(const HbBTree&);
@@ -139,7 +146,7 @@ public:
     struct KV
     {
         HbKey m_Key;
-        int m_Value;
+        s64 m_Value;
         bool m_Added : 1;
 
         KV()
@@ -153,7 +160,7 @@ public:
         }
     };
 
-    static void CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range);
+    static void CreateRandomKeys(const HbKeyType keyType, KV* kv, const int numKeys, const bool unique, const int range);
     static void AddRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
     static void AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending);
