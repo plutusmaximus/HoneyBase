@@ -1,5 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
-
 #include "hb.h"
 
 #include <malloc.h>
@@ -11,36 +9,111 @@
 #include <windows.h>
 #endif
 
+namespace honeybase
+{
+
 static unsigned m_w = 77665;    /* must not be zero */
 static unsigned m_z = 22559;    /* must not be zero */
 
-unsigned HbRand()
+unsigned Rand()
 {
     m_z = 36969 * (m_z & 65535) + (m_z >> 16);
     m_w = 18000 * (m_w & 65535) + (m_w >> 16);
     return (m_z << 16) + m_w;  /* 32-bit result */
 }
 
-unsigned HbRand(const unsigned min, const unsigned max)
+unsigned Rand(const unsigned min, const unsigned max)
 {
-    return min + (HbRand() % (max - min));
+    return min + (Rand() % (max - min));
+}
+
+static const char BASE64_ALPHABET[] =
+{
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+};
+
+size_t Base64Encode(const byte* bytes, const size_t numBytes, char* buf, const size_t bufSize)
+{
+    byte val;
+    size_t strLen = 0;
+    const size_t numBits = numBytes * 8;
+    for(size_t i = 0; i < numBits && strLen < bufSize-1; i += 6)
+    {
+        const size_t byteIdx = i >> 3;
+        switch(i & 0x07)
+        {
+            case 0:
+                val = (bytes[byteIdx]>>2) & 63;
+                break;
+            case 1:
+                val = (bytes[byteIdx]>>1) & 63;
+                break;
+            case 2:
+                val = (bytes[byteIdx]>>0) & 63;
+                break;
+            case 3:
+                val = (bytes[byteIdx]<<1);
+                if(byteIdx+1 < numBytes)
+                {
+                    val |= (bytes[byteIdx+1]>>7);
+                }
+                val &= 63;
+                break;
+            case 4:
+                val = (bytes[byteIdx]<<2);
+                if(byteIdx+1 < numBytes)
+                {
+                    val |= (bytes[byteIdx+1]>>6);
+                }
+                val &= 63;
+                break;
+            case 5:
+                val = (bytes[byteIdx]<<3);
+                if(byteIdx+1 < numBytes)
+                {
+                    val |= (bytes[byteIdx+1]>>5);
+                }
+                val &= 63;
+                break;
+            case 6:
+                val = (bytes[byteIdx]<<4);
+                if(byteIdx+1 < numBytes)
+                {
+                    val |= (bytes[byteIdx+1]>>4);
+                }
+                val &= 63;
+                break;
+            case 7:
+                val = (bytes[byteIdx]<<5);
+                if(byteIdx+1 < numBytes)
+                {
+                    val |= (bytes[byteIdx+1]>>3);
+                }
+                val &= 63;
+                break;
+        }
+        buf[strLen++] = BASE64_ALPHABET[val];
+    }
+
+    buf[strLen] = '\0';
+    return strLen;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbLog
+//  Log
 ///////////////////////////////////////////////////////////////////////////////
-HbLog::HbLog()
+Log::Log()
 {
     m_Channel[0] = '\0';
 }
 
-HbLog::HbLog(const char* channel)
+Log::Log(const char* channel)
 {
     snprintf(m_Channel, sizeof(m_Channel)-1, "%s", channel);
 }
 
 void
-HbLog::Debug(const char* fmt, ...)
+Log::Debug(const char* fmt, ...)
 {
     char prefix[128];
     char buf[1024];
@@ -55,7 +128,7 @@ HbLog::Debug(const char* fmt, ...)
 }
 
 void
-HbLog::Error(const char* fmt, ...)
+Log::Error(const char* fmt, ...)
 {
     char prefix[128];
     char buf[1024];
@@ -70,82 +143,95 @@ HbLog::Error(const char* fmt, ...)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbHeap
+//  Heap
 ///////////////////////////////////////////////////////////////////////////////
 void*
-HbHeap::ZAlloc(size_t size)
+Heap::ZAlloc(size_t size)
 {
 	return calloc(1, size);
 }
 
 void
-HbHeap::Free(void* mem)
+Heap::Free(void* mem)
 {
 	free(mem);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbString
+//  Blob
 ///////////////////////////////////////////////////////////////////////////////
-HbString*
-HbString::Create(const size_t stringLen)
+Blob*
+Blob::Create(const size_t len)
 {
-    return Create(NULL, stringLen);
+    return Create(NULL, len);
 }
 
-HbString*
-HbString::Create(const byte* string, const size_t stringLen)
+Blob*
+Blob::Create(const byte* bytes, const size_t len)
 {
-    const size_t size = Size(stringLen);
-    HbString* hbs = (HbString*) HbHeap::ZAlloc(size);
-    if(hbs)
+    const size_t size = Size(len);
+    Blob* blob = (Blob*) Heap::ZAlloc(size);
+    if(blob)
     {
-        Init(hbs, string, stringLen);
+        Init(blob, bytes, len);
     }
 
-    return hbs;
+    return blob;
 }
 
-HbString*
-HbString::Dup(const HbString* string)
+Blob*
+Blob::Dup(const Blob* blob)
 {
-    HbString* hbs = (HbString*) HbHeap::ZAlloc(string->Size());
-    if(hbs)
+    Blob* newBlob = (Blob*) Heap::ZAlloc(blob->Size());
+    if(newBlob)
     {
-        const byte* data;
-        const size_t len = string->GetData(&data);
-        Init(hbs, data, len);
+        const byte* bytes;
+        const size_t len = blob->GetData(&bytes);
+        Init(newBlob, bytes, len);
     }
 
-    return hbs;
+    return newBlob;
 }
 
 void
-HbString::Destroy(HbString* hbs)
+Blob::Destroy(Blob* blob)
 {
-    hbs->~HbString();
-    HbHeap::Free(hbs);
+    blob->~Blob();
+    Heap::Free(blob);
 }
 
-HbString*
-HbString::Encode(const byte* src, const size_t srcLen,
+Blob*
+Blob::Encode(const byte* src, const size_t srcLen,
                 byte* dst, const size_t dstSize)
 {
     const size_t size = Size(srcLen);
     if(hbverify(size <= dstSize))
     {
-        Init((HbString*)dst, src, srcLen);
-        return (HbString*)dst;
+        Init((Blob*)dst, src, srcLen);
+        return (Blob*)dst;
     }
 
     return NULL;
 }
 
 size_t
-HbString::GetData(const byte* hbs, const byte** data)
+Blob::Size(const size_t len)
+{
+    size_t size = len;
+    size_t tmpLen = len;
+
+    for(++size, tmpLen >>= 7; tmpLen; ++size, tmpLen >>= 7)
+    {
+    }
+
+    return size;
+}
+
+size_t
+Blob::GetData(const byte** data) const
 {
     size_t len = 0;
-    const byte* p = hbs;
+    const byte* p = (const byte*)this;
     int shift = 0;
 
     while(*p & 0x80)
@@ -162,19 +248,16 @@ HbString::GetData(const byte* hbs, const byte** data)
 }
 
 size_t
-HbString::GetData(byte* hbs, byte** data)
+Blob::GetData(byte** data)
 {
-    const byte* cdata;
-    const size_t len = GetData(hbs, &cdata);
-    *data = (byte*)cdata;
-    return len;
+    return GetData((const byte**) data);
 }
 
 size_t
-HbString::Length(const byte* hbs)
+Blob::Length() const
 {
     size_t len = 0;
-    const byte* p = hbs;
+    const byte* p = (const byte*)this;
     int shift = 0;
 
     while(*p & 0x80)
@@ -189,69 +272,34 @@ HbString::Length(const byte* hbs)
 }
 
 size_t
-HbString::Size(const byte* hbs)
+Blob::Size() const
 {
-    size_t len = 0;
-    const byte* p = hbs;
+    size_t size = 0;
+    const byte* p = (const byte*)this;
     int shift = 0;
 
     while(*p & 0x80)
     {
-        len |= (*p++ & 0x7F) << shift;
+        size |= (*p++ & 0x7F) << shift;
         shift += 7;
     }
 
-    len |= (*p & 0x7F) << shift;
+    size |= (*p & 0x7F) << shift;
 
-    return len + (p - hbs + 1);
+    return size + (p - (const byte*)this + 1);
 }
 
-size_t
-HbString::Size(const size_t stringLen)
-{
-    size_t size = stringLen;
-    size_t tmpLen = stringLen;
-
-    for(++size, tmpLen >>= 7; tmpLen; ++size, tmpLen >>= 7)
-    {
-    }
-
-    return size;
-}
-
-size_t
-HbString::GetData(const byte** data) const
-{
-    return GetData((const byte*) this, data);
-}
-
-size_t
-HbString::GetData(byte** data)
-{
-    return GetData((byte*) this, data);
-}
-
-size_t
-HbString::Length() const
-{
-    return Length((const byte*) this);
-}
-
-size_t
-HbString::Size() const
-{
-    return Size((const byte*) this);
-}
-
-HbString*
-HbString::Dup() const
+Blob*
+Blob::Dup() const
 {
     return Dup(this);
 }
 
 int
-HbString::Compare(const byte* thatData, const size_t thatLen) const
+Blob::Compare(const Blob* that) const
 {
+    const byte* thatData;
+    const size_t thatLen = that->GetData(&thatData);
     const byte* myData;
     const size_t myLen = GetData(&myData);
 
@@ -288,11 +336,11 @@ HbString::Compare(const byte* thatData, const size_t thatLen) const
 //protected:
 
 void
-HbString::Init(HbString* hbs, const byte* bytes, const size_t stringLen)
+Blob::Init(Blob* hbs, const byte* bytes, const size_t len)
 {
     byte* p = (byte*) hbs;
 
-    size_t tmpLen = stringLen;
+    size_t tmpLen = len;
     while(tmpLen > 0x7F)
     {
         *p++ = 0x80 | (tmpLen & 0x7F);
@@ -303,22 +351,22 @@ HbString::Init(HbString* hbs, const byte* bytes, const size_t stringLen)
 
     if(bytes)
     {
-        memcpy(p, bytes, stringLen);
+        memcpy(p, bytes, len);
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbStringTest
+//  BlobTest
 ///////////////////////////////////////////////////////////////////////////////
 void
-HbStringTest::Test()
+BlobTest::Test()
 {
-    HbString* hbs = HbString::Create((const byte*)"Foo", strlen("Foo"));
+    Blob* hbs = Blob::Create((const byte*)"Foo", strlen("Foo"));
     const byte* data;
     size_t len = hbs->GetData(&data);
     hbassert(len == 3);
     hbassert(0 == memcmp("Foo", data, strlen("Foo")));
-    HbString::Destroy(hbs);
+    Blob::Destroy(hbs);
 
     byte* str;
 
@@ -329,11 +377,11 @@ HbStringTest::Test()
         str[i] = (byte)i;
     }
 
-    hbs = HbString::Create(str, len);
+    hbs = Blob::Create(str, len);
     hbs->GetData(&data);
     hbassert(hbs->Length() == len);
     hbassert(0 == memcmp(str, data, len));
-    HbString::Destroy(hbs);
+    Blob::Destroy(hbs);
     delete [] str;
 
     len = 0x7FFF + 321;
@@ -343,11 +391,11 @@ HbStringTest::Test()
         str[i] = (byte)i;
     }
 
-    hbs = HbString::Create(str, len);
+    hbs = Blob::Create(str, len);
     hbassert(hbs->Length() == len);
     hbs->GetData(&data);
     hbassert(0 == memcmp(str, data, len));
-    HbString::Destroy(hbs);
+    Blob::Destroy(hbs);
     delete [] str;
 
     len = 0x7FFFFF + 321;
@@ -357,18 +405,18 @@ HbStringTest::Test()
         str[i] = (byte)i;
     }
 
-    hbs = HbString::Create(str, len);
+    hbs = Blob::Create(str, len);
     hbassert(hbs->Length() == len);
     hbs->GetData(&data);
     hbassert(0 == memcmp(str, data, len));
-    HbString::Destroy(hbs);
+    Blob::Destroy(hbs);
     delete [] str;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbStopWatch
+//  StopWatch
 ///////////////////////////////////////////////////////////////////////////////
-HbStopWatch::HbStopWatch()
+StopWatch::StopWatch()
 : m_Start(0)
 , m_Stop(0)
 , m_Running(false)
@@ -381,7 +429,7 @@ HbStopWatch::HbStopWatch()
 }
 
 void
-HbStopWatch::Restart()
+StopWatch::Restart()
 {
 #if _MSC_VER
     QueryPerformanceCounter((LARGE_INTEGER*)&m_Start);
@@ -394,7 +442,7 @@ HbStopWatch::Restart()
 }
 
 void
-HbStopWatch::Stop()
+StopWatch::Stop()
 {
 #if _MSC_VER
     QueryPerformanceCounter((LARGE_INTEGER*)&m_Stop);
@@ -407,7 +455,7 @@ HbStopWatch::Stop()
 }
 
 double
-HbStopWatch::GetElapsed() const
+StopWatch::GetElapsed() const
 {
     u64 stop;
     if(m_Running)
@@ -428,3 +476,4 @@ HbStopWatch::GetElapsed() const
     return ((double)(stop - m_Start)) / m_Freq;
 }
 
+}   //namespace honeybase

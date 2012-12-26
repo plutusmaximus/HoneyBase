@@ -2,12 +2,15 @@
 
 #include <algorithm>
 
-static HbLog s_Log("skiplist");
+namespace honeybase
+{
+
+static Log s_Log("skiplist");
 
 static unsigned RandomHeight(unsigned maxHeight)
 {
     unsigned height = 1;
-    /*unsigned r = HbRand();
+    /*unsigned r = Rand();
 
     while(!(r&1) && height < maxHeight)
     {
@@ -15,7 +18,7 @@ static unsigned RandomHeight(unsigned maxHeight)
         r >>= 1;
     }*/
 
-    while((HbRand() & 0xFFFF) < (0.5*0xFFFF) && height < maxHeight)
+    while((Rand() & 0xFFFF) < (0.5*0xFFFF) && height < maxHeight)
     {
         ++height;
     }
@@ -24,19 +27,19 @@ static unsigned RandomHeight(unsigned maxHeight)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbSkipNode
+//  SkipNode
 ///////////////////////////////////////////////////////////////////////////////
-static HbSkipNode* s_Pools[HbSkipList::MAX_HEIGHT];
+static SkipNode* s_Pools[SkipList::MAX_HEIGHT];
 
-HbSkipNode*
-HbSkipNode::Create()
+SkipNode*
+SkipNode::Create()
 {
-    const unsigned height = RandomHeight(HbSkipList::MAX_HEIGHT);
-    HbSkipNode* node = s_Pools[height-1];
+    const unsigned height = RandomHeight(SkipList::MAX_HEIGHT);
+    SkipNode* node = s_Pools[height-1];
     if(!node)
     {
-        const size_t size = (sizeof(HbSkipNode) + (sizeof(HbSkipNode*)*(height-1)));
-        node = (HbSkipNode*)HbHeap::ZAlloc(size);
+        const size_t size = (sizeof(SkipNode) + (sizeof(SkipNode*)*(height-1)));
+        node = (SkipNode*)Heap::ZAlloc(size);
 
         if(node)
         {
@@ -51,46 +54,46 @@ HbSkipNode::Create()
     return node;
 }
 
-HbSkipNode*
-HbSkipNode::Create(const s64 key, const HbString* value)
+SkipNode*
+SkipNode::Create(const s64 key, const Blob* value)
 {
-    HbSkipNode* node = Create();
+    SkipNode* node = Create();
     if(node)
     {
         node->m_Key = key;
-        node->m_Value.m_String = value->Dup();
-        node->m_ValType = HB_VALUETYPE_STRING;
+        node->m_Value.m_Blob = value->Dup();
+        node->m_ValType = VALUETYPE_BLOB;
     }
 
     return node;
 }
 
-HbSkipNode*
-HbSkipNode::Create(const s64 key, const s64 value)
+SkipNode*
+SkipNode::Create(const s64 key, const s64 value)
 {
-    HbSkipNode* node = Create();
+    SkipNode* node = Create();
     if(node)
     {
         node->m_Key = key;
         node->m_Value.m_Int = value;
-        node->m_ValType = HB_VALUETYPE_INT;
+        node->m_ValType = VALUETYPE_INT;
     }
 
     return node;
 }
 
 void
-HbSkipNode::Destroy(HbSkipNode* node)
+SkipNode::Destroy(SkipNode* node)
 {
     if(node)
     {
         node->m_Links[0] = s_Pools[node->m_Height-1];
         s_Pools[node->m_Height-1] = node;
 
-        if(HB_VALUETYPE_STRING == node->m_ValType)
+        if(VALUETYPE_BLOB == node->m_ValType)
         {
-            HbString::Destroy(node->m_Value.m_String);
-            node->m_Value.m_String = NULL;
+            Blob::Destroy(node->m_Value.m_Blob);
+            node->m_Value.m_Blob = NULL;
         }
 
         //free(node);
@@ -98,32 +101,32 @@ HbSkipNode::Destroy(HbSkipNode* node)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbSkipList
+//  SkipList
 ///////////////////////////////////////////////////////////////////////////////
 bool
-HbSkipList::Insert(const s64 key, const HbString* value)
+SkipList::Insert(const s64 key, const Blob* value)
 {
-    HbSkipNode* node = HbSkipNode::Create(key, value);
+    SkipNode* node = SkipNode::Create(key, value);
     return node && Insert(node);
 }
 
 bool
-HbSkipList::Insert(const s64 key, const s64 value)
+SkipList::Insert(const s64 key, const s64 value)
 {
-    HbSkipNode* node = HbSkipNode::Create(key, value);
+    SkipNode* node = SkipNode::Create(key, value);
     return node && Insert(node);
 }
 
 int
-HbSkipList::LowerBound(const s64 key, const HbSkipItem* first, const HbSkipItem* end)
+SkipList::LowerBound(const s64 key, const SkipItem* first, const SkipItem* end)
 {
     if(end > first)
     {
-        const HbSkipItem* cur = first;
+        const SkipItem* cur = first;
         size_t count = end - first;
         while(count > 0)
         {
-            const HbSkipItem* item = cur;
+            const SkipItem* item = cur;
             size_t step = count >> 1;
             item += step;
             if(item->m_Key < key)
@@ -144,15 +147,15 @@ HbSkipList::LowerBound(const s64 key, const HbSkipItem* first, const HbSkipItem*
 }
 
 int
-HbSkipList::UpperBound(const s64 key, const HbSkipItem* first, const HbSkipItem* end)
+SkipList::UpperBound(const s64 key, const SkipItem* first, const SkipItem* end)
 {
     if(end > first)
     {
-        const HbSkipItem* cur = first;
+        const SkipItem* cur = first;
         size_t count = end - first;
         while(count > 0)
         {
-            const HbSkipItem* item = cur;
+            const SkipItem* item = cur;
             const size_t step = count >> 1;
             item += step;
             if(!(key < item->m_Key))
@@ -173,18 +176,18 @@ HbSkipList::UpperBound(const s64 key, const HbSkipItem* first, const HbSkipItem*
 }
 
 bool
-HbSkipList::Insert2(const s64 key, const s64 value)
+SkipList::Insert2(const s64 key, const s64 value)
 {
     if(!m_Height)
     {
-        HbSkipNode* node = HbSkipNode::Create();
+        SkipNode* node = SkipNode::Create();
         if(node)
         {
             m_Capacity += hbarraylen(node->m_Items);
             m_Height = node->m_Height;
             node->m_Items[0].m_Key = key;
             node->m_Items[0].m_Value.m_Int = value;
-            node->m_Items[0].m_ValType = HB_VALUETYPE_INT;
+            node->m_Items[0].m_ValType = VALUETYPE_INT;
             ++node->m_NumItems;
             for(int i = m_Height-1; i >= 0; --i)
             {
@@ -196,10 +199,10 @@ HbSkipList::Insert2(const s64 key, const s64 value)
     }
     else
     {
-        HbSkipNode** links[MAX_HEIGHT+1] = {0};
+        SkipNode** links[MAX_HEIGHT+1] = {0};
 
         links[m_Height] = m_Head;
-        HbSkipNode* cur = NULL;
+        SkipNode* cur = NULL;
 
         for(int i = m_Height-1; i >= 0; --i)
         {
@@ -215,7 +218,7 @@ HbSkipList::Insert2(const s64 key, const s64 value)
 
         if(cur->m_NumItems == hbarraylen(cur->m_Items))
         {
-            HbSkipNode* node = HbSkipNode::Create();
+            SkipNode* node = SkipNode::Create();
             if(!hbverify(node))
             {
                 return false;
@@ -226,8 +229,8 @@ HbSkipList::Insert2(const s64 key, const s64 value)
             const int numToMove = cur->m_NumItems/2;
             const int numLeft = cur->m_NumItems - numToMove;
             idx -= numToMove;
-            memcpy(&node->m_Items[0], &cur->m_Items[0], numToMove*sizeof(HbSkipItem));
-            memmove(&cur->m_Items[0], &cur->m_Items[numToMove], numLeft*sizeof(HbSkipItem));
+            memcpy(&node->m_Items[0], &cur->m_Items[0], numToMove*sizeof(SkipItem));
+            memmove(&cur->m_Items[0], &cur->m_Items[numToMove], numLeft*sizeof(SkipItem));
 
             node->m_NumItems = numToMove;
             cur->m_NumItems -= numToMove;
@@ -255,12 +258,12 @@ HbSkipList::Insert2(const s64 key, const s64 value)
         {
             memmove(&cur->m_Items[idx+1],
                     &cur->m_Items[idx],
-                    (cur->m_NumItems-idx)*sizeof(HbSkipItem));
+                    (cur->m_NumItems-idx)*sizeof(SkipItem));
         }
 
         cur->m_Items[idx].m_Key = key;
         cur->m_Items[idx].m_Value.m_Int = value;
-        cur->m_Items[idx].m_ValType = HB_VALUETYPE_INT;
+        cur->m_Items[idx].m_ValType = VALUETYPE_INT;
         ++cur->m_NumItems;
         ++m_Count;
         return true;
@@ -270,14 +273,14 @@ HbSkipList::Insert2(const s64 key, const s64 value)
 }
 
 bool
-HbSkipList::Delete(const s64 key)
+SkipList::Delete(const s64 key)
 {
-    HbSkipNode** prev = m_Head;
-    HbSkipNode* node = NULL;
+    SkipNode** prev = m_Head;
+    SkipNode* node = NULL;
 
     for(int i = m_Height-1; i >= 0; --i)
     {
-        HbSkipNode* cur;
+        SkipNode* cur;
         for(cur = prev[i]; cur && cur->m_Key < key; prev = cur->m_Links, cur = prev[i])
         {
         }
@@ -313,7 +316,7 @@ HbSkipList::Delete(const s64 key)
 
     if(node)
     {
-        HbSkipNode::Destroy(node);
+        SkipNode::Destroy(node);
         --m_Count;
         return true;
     }
@@ -322,11 +325,11 @@ HbSkipList::Delete(const s64 key)
 }
 
 bool
-HbSkipList::Find(const s64 key, s64* value) const
+SkipList::Find(const s64 key, s64* value) const
 {
-    const HbSkipNode* node = Find(key);
+    const SkipNode* node = Find(key);
 
-    if(node && HB_VALUETYPE_INT == node->m_ValType)
+    if(node && VALUETYPE_INT == node->m_ValType)
     {
         *value = node->m_Value.m_Int;
         return true;
@@ -336,13 +339,13 @@ HbSkipList::Find(const s64 key, s64* value) const
 }
 
 bool
-HbSkipList::Find(const s64 key, const HbString** value) const
+SkipList::Find(const s64 key, const Blob** value) const
 {
-    const HbSkipNode* node = Find(key);
+    const SkipNode* node = Find(key);
 
-    if(node && HB_VALUETYPE_STRING == node->m_ValType)
+    if(node && VALUETYPE_BLOB == node->m_ValType)
     {
-        *value = node->m_Value.m_String;
+        *value = node->m_Value.m_Blob;
         return true;
     }
 
@@ -350,10 +353,10 @@ HbSkipList::Find(const s64 key, const HbString** value) const
 }
 
 bool
-HbSkipList::Find2(const s64 key, s64* value) const
+SkipList::Find2(const s64 key, s64* value) const
 {
-    const HbSkipNode* const* prev = m_Head;
-    const HbSkipNode* cur = NULL;
+    const SkipNode* const* prev = m_Head;
+    const SkipNode* cur = NULL;
 
     for(int i = m_Height-1; i >= 0; --i)
     {
@@ -382,7 +385,7 @@ HbSkipList::Find2(const s64 key, s64* value) const
 }
 
 double
-HbSkipList::GetUtilization() const
+SkipList::GetUtilization() const
 {
     return (m_Capacity > 0 ) ? (double)m_Count/m_Capacity : 0;
 }
@@ -390,9 +393,9 @@ HbSkipList::GetUtilization() const
 //private:
 
 bool
-HbSkipList::Insert(HbSkipNode* node)
+SkipList::Insert(SkipNode* node)
 {
-    HbSkipNode** prev = m_Head;
+    SkipNode** prev = m_Head;
 
     if(node->m_Height > m_Height)
     {
@@ -402,14 +405,14 @@ HbSkipList::Insert(HbSkipNode* node)
     int i;
     for(i = m_Height-1; i >= node->m_Height; --i)
     {
-        for(HbSkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
+        for(SkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
         {
         }
     }
 
     for(; i >= 0; --i)
     {
-        for(HbSkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
+        for(SkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
         {
         }
 
@@ -421,14 +424,14 @@ HbSkipList::Insert(HbSkipNode* node)
     return true;
 }
 
-const HbSkipNode*
-HbSkipList::Find(const s64 key) const
+const SkipNode*
+SkipList::Find(const s64 key) const
 {
-    const HbSkipNode* const* prev = m_Head;
+    const SkipNode* const* prev = m_Head;
 
     for(int i = m_Height-1; i >= 0; --i)
     {
-        const HbSkipNode* cur;
+        const SkipNode* cur;
         for(cur = prev[i]; cur && cur->m_Key < key; prev = cur->m_Links, cur = prev[i])
         {
         }
@@ -443,15 +446,15 @@ HbSkipList::Find(const s64 key) const
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbSkipListTest
+//  SkipListTest
 ///////////////////////////////////////////////////////////////////////////////
 static ptrdiff_t myrandom (ptrdiff_t i)
 {
-    return HbRand()%i;
+    return Rand()%i;
 }
 
 void
-HbSkipListTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
+SkipListTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
 {
     if(unique)
     {
@@ -465,18 +468,18 @@ HbSkipListTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, c
     {
         for(int i = 0; i < numKeys; ++i)
         {
-            kv[i].m_Key = HbRand() % range;
+            kv[i].m_Key = Rand() % range;
         }
     }
 }
 
 void
-HbSkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
+SkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbSkipList* skiplist = (HbSkipList*)HbHeap::ZAlloc(sizeof(HbSkipList));
+    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
     s64 value;
 
-    HbStopWatch sw;
+    StopWatch sw;
 
     KV* kv = new KV[numKeys];
     CreateRandomKeys(kv, numKeys, unique, range);
@@ -527,17 +530,17 @@ HbSkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int ra
     }
     sw.Stop();
 
-    HbHeap::Free(skiplist);
+    Heap::Free(skiplist);
     delete [] kv;
 }
 
 void
-HbSkipListTest::AddRandomKeys2(const int numKeys, const bool unique, const int range)
+SkipListTest::AddRandomKeys2(const int numKeys, const bool unique, const int range)
 {
-    HbSkipList* skiplist = (HbSkipList*)HbHeap::ZAlloc(sizeof(HbSkipList));
+    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
     s64 value;
 
-    HbStopWatch sw;
+    StopWatch sw;
 
     KV* kv = new KV[numKeys];
     CreateRandomKeys(kv, numKeys, unique, range);
@@ -592,14 +595,14 @@ HbSkipListTest::AddRandomKeys2(const int numKeys, const bool unique, const int r
     }
     sw.Stop();*/
 
-    HbHeap::Free(skiplist);
+    Heap::Free(skiplist);
     delete [] kv;
 }
 
 void
-HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
+SkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
 {
-    HbSkipList* skiplist = (HbSkipList*)HbHeap::ZAlloc(sizeof(HbSkipList));
+    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
     s64 value;
 
     KV* kv = new KV[numKeys];
@@ -611,7 +614,7 @@ HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const 
 
     for(int i = 0; i < numKeys; ++i)
     {
-        int idx = HbRand() % numKeys;
+        int idx = Rand() % numKeys;
         if(!kv[idx].m_Added)
         {
             skiplist->Insert(kv[idx].m_Key, kv[idx].m_Value);
@@ -646,6 +649,8 @@ HbSkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const 
         }
     }
 
-    HbHeap::Free(skiplist);
+    Heap::Free(skiplist);
     delete [] kv;
 }
+
+}   //namespace honeybase

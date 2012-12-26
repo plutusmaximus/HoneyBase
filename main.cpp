@@ -1,9 +1,12 @@
-#include "hb.h"
 #include "dict.h"
 #include "btree.h"
 #include "skiplist.h"
 
-static HbLog s_Log("main");
+#include "tests.h"
+
+using namespace honeybase;
+
+static Log s_Log("main");
 
 void TestCommands();
 
@@ -11,67 +14,71 @@ void TestMemMappedFile();
 
 int main(int /*argc*/, char** /*argv*/)
 {
-    TestMemMappedFile();
-    TestCommands();
+    /*TestMemMappedFile();
+    TestCommands();*/
 
-    HbStringTest::Test();
-    HbDictTest::TestStringString(1024);
-    HbDictTest::TestStringInt(1024);
-    HbDictTest::TestIntInt(1024);
-    HbDictTest::TestIntString(1024);
-    HbDictTest::TestMergeIntKeys(1024, 100);
-
-    HbStopWatch sw;
+    StopWatch sw;
 
     const int NUMKEYS = 1000*1000;
 
-    s_Log.Debug("DICT");
+    const KeyType keyType = KEYTYPE_BLOB;
+    const ValueType valueType = VALUETYPE_INT;
+
+    s_Log.Debug("SPEED DICT");
     sw.Restart();
-    HbDictTest::AddRandomKeys(NUMKEYS);
+    {
+        HashTableSpeedTest test(keyType, valueType);
+        test.AddRandomKeys(NUMKEYS);
+    }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
 
-    /*sw.Restart();
-    HbSkipListTest::AddRandomKeys2(1024*1024, true, 0);
+    s_Log.Debug("SPEED BTREEE");
+    sw.Restart();
+    {
+        BTreeSpeedTest test(keyType, valueType);
+        test.AddRandomKeys(NUMKEYS, true, 0);
+    }
     sw.Stop();
-    s_Log.Debug("SKIPLIST: %f", sw.GetElapsed());*/
+    s_Log.Debug("total: %f", sw.GetElapsed());
+
+    s_Log.Debug("DICT");
+    sw.Restart();
+    {
+        HashTableTest test(keyType, valueType);
+        test.AddRandomKeys(NUMKEYS);
+    }
+    sw.Stop();
+    s_Log.Debug("total: %f", sw.GetElapsed());
 
     s_Log.Debug("BTREEE");
     sw.Restart();
-    HbBTreeTest::AddRandomKeys(NUMKEYS, true, 0);
+    {
+        BTreeTest test(keyType, valueType);
+        test.AddRandomKeys(NUMKEYS, true, 0);
+    }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
 
     s_Log.Debug("BTREEE(asc)");
     sw.Restart();
-    HbBTreeTest::AddSortedKeys(NUMKEYS, true, 0, true);
+    {
+        BTreeTest test(keyType, valueType);
+        test.AddSortedKeys(NUMKEYS, true, 0, true);
+    }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
 
     s_Log.Debug("BTREEE(desc)");
     sw.Restart();
-    HbBTreeTest::AddSortedKeys(NUMKEYS, true, 0, false);
+    {
+        BTreeTest test(keyType, valueType);
+        test.AddSortedKeys(NUMKEYS, true, 0, false);
+    }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
 
-    HbSkipListTest::AddDeleteRandomKeys(NUMKEYS, true, 0);
-
-    //HbBTreeTest::AddRandomKeys(1024, true, 32767);
-    //HbBTreeTest::AddRandomKeys(10, false, 1);
-    //HbBTreeTest::AddRandomKeys(1024*1024, false, 32767);
-    //HbBTreeTest::AddRandomKeys(1024*1024, false, 1);
-    //HbBTreeTest::AddRandomKeys(1024*1024, true, 0);
-
-    //HbBTreeTest::AddDups(1024*1024, 1, 1);
-    //HbBTreeTest::AddDups(1024*1024, 1, 2);
-    //HbBTreeTest::AddDups(1024*1024, 1, 4);
-    //HbBTreeTest::AddDups(32, 1, 5);
-    //HbBTreeTest::AddDups(28, 1, 5);
-
-    //(hset (hget (hget (hget a b) c) d) foo 123)
-    //(hset a.b.c.d foo 123)
-    //(hget z (hget a.b.c.d.foo))
-    //(hget z (range a.b.c.d.foo 35 87))
+    SkipListTest::AddDeleteRandomKeys(NUMKEYS, true, 0);
 }
 
 #include <string.h>
@@ -110,7 +117,7 @@ public:
 
 const char* ParseCmd(const char* cmdStr, const size_t len, Command** cmd);
 void PrintCmd(const Command* cmd);
-void ExecCmd(const Command* cmd, HbDict* dict);
+void ExecCmd(const Command* cmd, HashTable* dict);
 
 void TestCommands()
 {
@@ -120,7 +127,7 @@ void TestCommands()
     const char cmdStr4[] = {"*4 $3 set *3 $3 get $1 a $1 b $3 foo $3 123"};
     const char cmdStr5[] = {"*4 $3 set *3 $3 get $1 a $1 b *3 $3 get $1 c $1 d *3 $3 get $1 e $1 f"};
 
-    HbDict* dict = HbDict::Create();
+    HashTable* dict = HashTable::Create();
     Command* cmd1;
     Command* cmd2;
     Command* cmd3;
@@ -141,7 +148,7 @@ void TestCommands()
 
     ExecCmd(cmd1, dict);
     ExecCmd(cmd2, dict);
-    HbDict::Destroy(dict);
+    HashTable::Destroy(dict);
 }
 
 void PrintCmd(const Command* cmd)
@@ -159,18 +166,18 @@ void PrintCmd(const Command* cmd)
     }
 }
 
-void ExecCmd(const Command* cmd, HbDict* dict)
+void ExecCmd(const Command* cmd, HashTable* dict)
 {
     if(!strcmp((char*)cmd->argv[0].argVal, "set"))
     {
-        HbString* key = HbString::Create(cmd->argv[1].argVal, cmd->argv[1].argLen);
-        HbString* val = HbString::Create(cmd->argv[2].argVal, cmd->argv[2].argLen);
+        Blob* key = Blob::Create(cmd->argv[1].argVal, cmd->argv[1].argLen);
+        Blob* val = Blob::Create(cmd->argv[2].argVal, cmd->argv[2].argLen);
         dict->Set(key, val);
     }
     else if(!strcmp((char*)cmd->argv[0].argVal, "get"))
     {
-        HbString* key = HbString::Create(cmd->argv[1].argVal, cmd->argv[1].argLen);
-        const HbString* val;
+        Blob* key = Blob::Create(cmd->argv[1].argVal, cmd->argv[1].argLen);
+        const Blob* val;
         if(dict->Find(key, &val))
         {
             int iii = 0;

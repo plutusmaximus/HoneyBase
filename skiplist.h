@@ -3,54 +3,57 @@
 
 #include "hb.h"
 
-class HbSkipNode;
-class HbSkipList;
-
-class HbSkipItem
+namespace honeybase
 {
-    friend class HbSkipList;
+
+class SkipNode;
+class SkipList;
+
+class SkipItem
+{
+    friend class SkipList;
 
     s64 m_Key;
-    HbValue m_Value;
-    HbValueType m_ValType;
+    Value m_Value;
+    ValueType m_ValType;
 };
 
-class HbSkipNode
+class SkipNode
 {
 public:
-    static HbSkipNode* Create();
-    static HbSkipNode* Create(const s64 key, const HbString* value);
-    static HbSkipNode* Create(const s64 key, const s64 value);
-    static void Destroy(HbSkipNode* node);
+    static SkipNode* Create();
+    static SkipNode* Create(const s64 key, const Blob* value);
+    static SkipNode* Create(const s64 key, const s64 value);
+    static void Destroy(SkipNode* node);
 
     static const int BLOCK_LEN  = 64;
 
-    HbSkipItem m_Items[BLOCK_LEN];
+    SkipItem m_Items[BLOCK_LEN];
     int m_NumItems;
 
     s64 m_Key;
-    HbValue m_Value;
+    Value m_Value;
     int m_Height;
 
-    HbValueType m_ValType : 4;
+    ValueType m_ValType : 4;
 
     //This must be the last member in var in the class.
-    HbSkipNode* m_Links[1];
+    SkipNode* m_Links[1];
 
 private:
 
-    HbSkipNode();
-    ~HbSkipNode();
-    HbSkipNode(const HbSkipNode&);
-    HbSkipNode& operator=(const HbSkipNode&);
+    SkipNode();
+    ~SkipNode();
+    SkipNode(const SkipNode&);
+    SkipNode& operator=(const SkipNode&);
 };
 
-class HbSkipList
+class SkipList
 {
 public:
     static const int MAX_HEIGHT = 32;
 
-    bool Insert(const s64 key, const HbString* value);
+    bool Insert(const s64 key, const Blob* value);
     bool Insert(const s64 key, const s64 value);
 
     bool Insert2(const s64 key, const s64 value);
@@ -58,7 +61,7 @@ public:
     bool Delete(const s64 key);
 
     bool Find(const s64 key, s64* value) const;
-    bool Find(const s64 key, const HbString** value) const;
+    bool Find(const s64 key, const Blob** value) const;
 
     bool Find2(const s64 key, s64* value) const;
 
@@ -67,23 +70,23 @@ public:
     int m_Height;
     unsigned m_Count;
     unsigned m_Capacity;
-    HbSkipNode* m_Head[MAX_HEIGHT];
+    SkipNode* m_Head[MAX_HEIGHT];
 
 private:
     
-    bool Insert(HbSkipNode* node);
-    const HbSkipNode* Find(const s64 key) const;
+    bool Insert(SkipNode* node);
+    const SkipNode* Find(const s64 key) const;
 
-    static int LowerBound(const s64 key, const HbSkipItem* first, const HbSkipItem* end);
-    static int UpperBound(const s64 key, const HbSkipItem* first, const HbSkipItem* end);
+    static int LowerBound(const s64 key, const SkipItem* first, const SkipItem* end);
+    static int UpperBound(const s64 key, const SkipItem* first, const SkipItem* end);
 
-    HbSkipList();
-    ~HbSkipList();
-    HbSkipList(const HbSkipList&);
-    HbSkipList& operator=(const HbSkipList&);
+    SkipList();
+    ~SkipList();
+    SkipList(const SkipList&);
+    SkipList& operator=(const SkipList&);
 };
 
-class HbSkipListTest
+class SkipListTest
 {
 public:
     struct KV
@@ -110,5 +113,7 @@ public:
 
     static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
 };
+
+}   //namespace honeybase
 
 #endif  //__HB_SKIPLIST_H__

@@ -1,15 +1,16 @@
-#define _CRT_SECURE_NO_WARNINGS
-
 #include "dict.h"
 
-#include <algorithm>
 #include <new.h>
-#include <stdio.h>
 #include <string.h>
 
-static HbLog s_Log("dict");
+namespace honeybase
+{
+
+static Log s_Log("dict");
 
 #define FNV1_32_INIT ((u32)0x811c9dc5)
+//#define NO_FNV_GCC_OPTIMIZATION
+//#define FNV_32_PRIME 16777619
 
 static u32 FnvHashBufInitVal(const byte *buf, size_t len, u32 hval)
 {
@@ -41,6 +42,73 @@ static u32 FnvHashBufInitVal(const byte *buf, size_t len, u32 hval)
 return FnvHashBufInitVal(buf, len, FNV1_32_INIT);
 }*/
 
+//-----------------------------------------------------------------------------
+// MurmurHash2, by Austin Appleby
+
+// Note - This code makes a few assumptions about how your machine behaves -
+
+// 1. We can read a 4-byte value from any address without crashing
+// 2. sizeof(int) == 4
+
+// And it has a few limitations -
+
+// 1. It will not work incrementally.
+// 2. It will not produce the same results on little-endian and big-endian
+//    machines.
+
+unsigned int MurmurHash2(const void * key, int len, unsigned int seed)
+{
+	// 'm' and 'r' are mixing constants generated offline.
+	// They're not really 'magic', they just happen to work well.
+
+    hb_static_assert(sizeof(int) == 4);
+
+	const unsigned int m = 0x5bd1e995;
+	const int r = 24;
+
+	// Initialize the hash to a 'random' value
+
+	unsigned int h = seed ^ len;
+
+	// Mix 4 bytes at a time into the hash
+
+	const unsigned char * data = (const unsigned char *)key;
+
+	while(len >= 4)
+	{
+		unsigned int k = *(unsigned int *)data;
+
+		k *= m; 
+		k ^= k >> r; 
+		k *= m; 
+		
+		h *= m; 
+		h ^= k;
+
+		data += 4;
+		len -= 4;
+	}
+	
+	// Handle the last few bytes of the input array
+
+	switch(len)
+	{
+	case 3: h ^= data[2] << 16;
+	case 2: h ^= data[1] << 8;
+	case 1: h ^= data[0];
+	        h *= m;
+	};
+
+	// Do a few final mixes of the hash to ensure the last few
+	// bytes are well-incorporated.
+
+	h ^= h >> 13;
+	h *= m;
+	h ^= h >> 15;
+
+	return h;
+} 
+
 template<typename T>
 static inline void Move(T* dst, const T* src, const size_t count)
 {
@@ -54,19 +122,19 @@ static inline void Move(T* dst, const T* src, const size_t count)
 static size_t s_NumDictItems;
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbDictItem
+//  HtItem
 ///////////////////////////////////////////////////////////////////////////////
-HbDictItem*
-HbDictItem::Create(const HbString* key, const HbString* value)
+HtItem*
+HtItem::Create(const Blob* key, const Blob* value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_STRING;
-        item->m_ValType = HB_VALUETYPE_STRING;
+        item->m_KeyType = KEYTYPE_BLOB;
+        item->m_ValType = VALUETYPE_BLOB;
 
-        if(NULL == (item->m_Key.m_String = key->Dup())
-            || NULL == (item->m_Value.m_String = value->Dup()))
+        if(NULL == (item->m_Key.m_Blob = key->Dup())
+            || NULL == (item->m_Value.m_Blob = value->Dup()))
         {
             Destroy(item);
             item = NULL;
@@ -76,17 +144,17 @@ HbDictItem::Create(const HbString* key, const HbString* value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::Create(const HbString* key, const s64 value)
+HtItem*
+HtItem::Create(const Blob* key, const s64 value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_STRING;
-        item->m_ValType = HB_VALUETYPE_INT;
+        item->m_KeyType = KEYTYPE_BLOB;
+        item->m_ValType = VALUETYPE_INT;
         item->m_Value.m_Int = value;
 
-        if(NULL == (item->m_Key.m_String = key->Dup()))
+        if(NULL == (item->m_Key.m_Blob = key->Dup()))
         {
             Destroy(item);
             item = NULL;
@@ -96,17 +164,17 @@ HbDictItem::Create(const HbString* key, const s64 value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::Create(const HbString* key, const double value)
+HtItem*
+HtItem::Create(const Blob* key, const double value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_STRING;
-        item->m_ValType = HB_VALUETYPE_DOUBLE;
+        item->m_KeyType = KEYTYPE_BLOB;
+        item->m_ValType = VALUETYPE_DOUBLE;
         item->m_Value.m_Double = value;
 
-        if(NULL == (item->m_Key.m_String = key->Dup()))
+        if(NULL == (item->m_Key.m_Blob = key->Dup()))
         {
             Destroy(item);
             item = NULL;
@@ -116,17 +184,17 @@ HbDictItem::Create(const HbString* key, const double value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::Create(const s64 key, const HbString* value)
+HtItem*
+HtItem::Create(const s64 key, const Blob* value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_INT;
-        item->m_ValType = HB_VALUETYPE_STRING;
+        item->m_KeyType = KEYTYPE_INT;
+        item->m_ValType = VALUETYPE_BLOB;
         item->m_Key.m_Int = key;
 
-        if(NULL == (item->m_Value.m_String = value->Dup()))
+        if(NULL == (item->m_Value.m_Blob = value->Dup()))
         {
             Destroy(item);
             item = NULL;
@@ -136,14 +204,14 @@ HbDictItem::Create(const s64 key, const HbString* value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::Create(const s64 key, const s64 value)
+HtItem*
+HtItem::Create(const s64 key, const s64 value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_INT;
-        item->m_ValType = HB_VALUETYPE_INT;
+        item->m_KeyType = KEYTYPE_INT;
+        item->m_ValType = VALUETYPE_INT;
         item->m_Key.m_Int = key;
         item->m_Value.m_Int = value;
     }
@@ -151,14 +219,14 @@ HbDictItem::Create(const s64 key, const s64 value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::Create(const s64 key, const double value)
+HtItem*
+HtItem::Create(const s64 key, const double value)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_INT;
-        item->m_ValType = HB_VALUETYPE_DOUBLE;
+        item->m_KeyType = KEYTYPE_INT;
+        item->m_ValType = VALUETYPE_DOUBLE;
         item->m_Key.m_Int = key;
         item->m_Value.m_Double = value;
     }
@@ -166,17 +234,17 @@ HbDictItem::Create(const s64 key, const double value)
     return item;
 }
 
-HbDictItem*
-HbDictItem::CreateEmpty(const HbString* key, const size_t len)
+HtItem*
+HtItem::CreateEmpty(const Blob* key, const size_t len)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_STRING;
-        item->m_ValType = HB_VALUETYPE_STRING;
+        item->m_KeyType = KEYTYPE_BLOB;
+        item->m_ValType = VALUETYPE_BLOB;
 
-        if(NULL == (item->m_Key.m_String = key->Dup())
-            || NULL == (item->m_Value.m_String = HbString::Create(len)))
+        if(NULL == (item->m_Key.m_Blob = key->Dup())
+            || NULL == (item->m_Value.m_Blob = Blob::Create(len)))
         {
             Destroy(item);
             item = NULL;
@@ -186,17 +254,17 @@ HbDictItem::CreateEmpty(const HbString* key, const size_t len)
     return item;
 }
 
-HbDictItem*
-HbDictItem::CreateEmpty(const s64 key, const size_t len)
+HtItem*
+HtItem::CreateEmpty(const s64 key, const size_t len)
 {
-    HbDictItem* item = Create();
+    HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = HB_KEYTYPE_INT;
-        item->m_ValType = HB_VALUETYPE_STRING;
+        item->m_KeyType = KEYTYPE_INT;
+        item->m_ValType = VALUETYPE_BLOB;
         item->m_Key.m_Int = key;
 
-        if(NULL == (item->m_Value.m_String = HbString::Create(len)))
+        if(NULL == (item->m_Value.m_Blob = Blob::Create(len)))
         {
             Destroy(item);
             item = NULL;
@@ -207,59 +275,59 @@ HbDictItem::CreateEmpty(const s64 key, const size_t len)
 }
 
 void
-HbDictItem::Destroy(HbDictItem* item)
+HtItem::Destroy(HtItem* item)
 {
     if(item)
     {
-        if(HB_VALUETYPE_STRING == item->m_KeyType)
+        if(VALUETYPE_BLOB == item->m_KeyType)
         {
-            HbString::Destroy(item->m_Key.m_String);
-            item->m_Key.m_String = NULL;
+            Blob::Destroy(item->m_Key.m_Blob);
+            item->m_Key.m_Blob = NULL;
         }
 
-        if(HB_VALUETYPE_STRING == item->m_ValType)
+        if(VALUETYPE_BLOB == item->m_ValType)
         {
-            HbString::Destroy(item->m_Value.m_String);
-            item->m_Value.m_String = NULL;
+            Blob::Destroy(item->m_Value.m_Blob);
+            item->m_Value.m_Blob = NULL;
         }
 
-        item->~HbDictItem();
-        HbHeap::Free(item);
+        item->~HtItem();
+        Heap::Free(item);
         --s_NumDictItems;
     }
 }
 
 //private:
 
-HbDictItem*
-HbDictItem::Create()
+HtItem*
+HtItem::Create()
 {
-    HbDictItem* item = (HbDictItem*) HbHeap::ZAlloc(sizeof(HbDictItem));
+    HtItem* item = (HtItem*) Heap::ZAlloc(sizeof(HtItem));
 
     if(item)
     {
-        new(item) HbDictItem();
+        new(item) HtItem();
         ++s_NumDictItems;
     }
 
     return item;
 }
 
-HbDictItem::HbDictItem()
+HtItem::HtItem()
     : m_Next(0)
-    , m_KeyType(HB_KEYTYPE_INVALID)
-    , m_ValType(HB_VALUETYPE_INVALID)
+    , m_KeyType(KEYTYPE_INT)
+    , m_ValType(VALUETYPE_INT)
 {
 }
 
-HbDictItem::~HbDictItem()
+HtItem::~HtItem()
 {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbDict
+//  HashTable
 ///////////////////////////////////////////////////////////////////////////////
-HbDict::HbDict()
+HashTable::HashTable()
     : m_Count(0)
     , m_NumSlots(0)
     , m_HashSalt(FNV1_32_INIT)
@@ -267,25 +335,25 @@ HbDict::HbDict()
     m_Slots[0] = m_Slots[1] = NULL;
 }
 
-HbDict::~HbDict()
+HashTable::~HashTable()
 {
 }
 
-HbDict*
-HbDict::Create()
+HashTable*
+HashTable::Create()
 {
-    HbDict* dict = (HbDict*) HbHeap::ZAlloc(sizeof(HbDict));
+    HashTable* dict = (HashTable*) Heap::ZAlloc(sizeof(HashTable));
     if(dict)
     {
-        new (dict) HbDict();
-        dict->m_Slots[0] = (Slot*) HbHeap::ZAlloc(INITIAL_NUM_SLOTS * sizeof(Slot));
+        new (dict) HashTable();
+        dict->m_Slots[0] = (Slot*) Heap::ZAlloc(INITIAL_NUM_SLOTS * sizeof(Slot));
         if(dict->m_Slots[0])
         {
             dict->m_NumSlots = INITIAL_NUM_SLOTS;
         }
         else
         {
-            HbDict::Destroy(dict);
+            HashTable::Destroy(dict);
             dict = NULL;
         }
     }
@@ -294,7 +362,7 @@ HbDict::Create()
 }
 
 void
-HbDict::Destroy(HbDict* dict)
+HashTable::Destroy(HashTable* dict)
 {
     if(dict)
     {
@@ -309,28 +377,75 @@ HbDict::Destroy(HbDict* dict)
 
             for(size_t j = 0; j < dict->m_NumSlots; ++j)
             {
-                HbDictItem* item = slots[j].m_Item;
+                HtItem* item = slots[j].m_Item;
                 while(item)
                 {
-                    HbDictItem* next = item->m_Next;
-                    HbDictItem::Destroy(item);
+                    HtItem* next = item->m_Next;
+                    HtItem::Destroy(item);
                     item = next;
                 }
             }
 
-            HbHeap::Free(slots);
+            Heap::Free(slots);
             dict->m_Slots[i] = NULL;
         }
 
-        dict->~HbDict();
-        HbHeap::Free(dict);
+        dict->~HashTable();
+        Heap::Free(dict);
     }
 }
 
 bool
-HbDict::Set(const HbString* key, const HbString* value)
+HashTable:: Set(const Key key, const KeyType keyType,
+                const Value value, const ValueType valueType)
 {
-    HbDictItem* item = HbDictItem::Create(key, value);
+    switch(keyType)
+    {
+    case KEYTYPE_INT:
+        switch(valueType)
+        {
+        case VALUETYPE_INT:
+            return Set(key.m_Int, value.m_Int);
+        //case VALUETYPE_DOUBLE:
+        //    return Set(key.m_Int, value.m_Double);
+        case VALUETYPE_BLOB:
+            return Set(key.m_Int, value.m_Blob);
+        default:
+            return false;
+        }
+    /*case KEYTYPE_DOUBLE:
+        switch(valueType)
+        {
+        case VALUETYPE_INT:
+            return Set(key.m_Double, value.m_Int);
+        case VALUETYPE_DOUBLE:
+            return Set(key.m_Double, value.m_Double);
+        case VALUETYPE_BLOB:
+            return Set(key.m_Double, value.m_Blob);
+        default:
+            return false;
+        }*/
+    case KEYTYPE_BLOB:
+        switch(valueType)
+        {
+        case VALUETYPE_INT:
+            return Set(key.m_Blob, value.m_Int);
+        //case VALUETYPE_DOUBLE:
+            //return Set(key.m_Blob, value.m_Double);
+        case VALUETYPE_BLOB:
+            return Set(key.m_Blob, value.m_Blob);
+        default:
+            return false;
+        }
+    }
+
+    return false;
+}
+
+bool
+HashTable::Set(const Blob* key, const Blob* value)
+{
+    HtItem* item = HtItem::Create(key, value);
     if(item)
     {
         Set(item);
@@ -341,9 +456,9 @@ HbDict::Set(const HbString* key, const HbString* value)
 }
 
 bool
-HbDict::Set(const HbString* key, const s64 value)
+HashTable::Set(const Blob* key, const s64 value)
 {
-    HbDictItem* item = HbDictItem::Create(key, value);
+    HtItem* item = HtItem::Create(key, value);
     if(item)
     {
         Set(item);
@@ -354,9 +469,9 @@ HbDict::Set(const HbString* key, const s64 value)
 }
 
 bool
-HbDict::Set(const s64 key, const HbString* value)
+HashTable::Set(const s64 key, const Blob* value)
 {
-    HbDictItem* item = HbDictItem::Create(key, value);
+    HtItem* item = HtItem::Create(key, value);
     if(item)
     {
         Set(item);
@@ -367,9 +482,9 @@ HbDict::Set(const s64 key, const HbString* value)
 }
 
 bool
-HbDict::Set(const s64 key, const s64 value)
+HashTable::Set(const s64 key, const s64 value)
 {
-    HbDictItem* item = HbDictItem::Create(key, value);
+    HtItem* item = HtItem::Create(key, value);
     if(item)
     {
         Set(item);
@@ -380,14 +495,31 @@ HbDict::Set(const s64 key, const s64 value)
 }
 
 bool
-HbDict::Clear(const s64 key)
+HashTable::Clear(const Key key, const KeyType keyType)
+{
+    switch(keyType)
+    {
+    case KEYTYPE_INT:
+        return Clear(key.m_Int);
+    //case KEYTYPE_DOUBLE:
+    //    return Clear(key.m_Double);
+    case KEYTYPE_BLOB:
+        return Clear(key.m_Blob);
+    }
+
+    return false;
+}
+
+bool
+HashTable::Clear(const s64 key)
 {
     Slot* slot;
-    HbDictItem** item = Find(key, &slot);
+    u32 hash;
+    HtItem** item = Find(key, &slot, &hash);
     if(*item)
     {
-        HbDictItem* next = (*item)->m_Next;
-        //HbDictItem::Destroy(*item);
+        HtItem* next = (*item)->m_Next;
+        //HtItem::Destroy(*item);
         *item = next;
 
         --slot->m_Count;
@@ -402,14 +534,15 @@ HbDict::Clear(const s64 key)
 }
 
 bool
-HbDict::Clear(const HbString* key)
+HashTable::Clear(const Blob* key)
 {
     Slot* slot;
-    HbDictItem** item = Find(key, &slot);
+    u32 hash;
+    HtItem** item = Find(key, &slot, &hash);
     if(*item)
     {
-        HbDictItem* next = (*item)->m_Next;
-        //HbDictItem::Destroy(*item);
+        HtItem* next = (*item)->m_Next;
+        //HtItem::Destroy(*item);
         *item = next;
 
         --slot->m_Count;
@@ -424,13 +557,33 @@ HbDict::Clear(const HbString* key)
 }
 
 bool
-HbDict::Find(const HbString* key, const HbString** value) const
+HashTable::Find(const Key key, const KeyType keyType,
+                Value* value, ValueType* valueType)
 {
     Slot* slot;
-    HbDictItem** item = const_cast<HbDict*>(this)->Find(key, &slot);
-    if(*item && (*item)->m_ValType == HB_VALUETYPE_STRING)
+    u32 hash;
+    HtItem** item;
+    
+    switch(keyType)
     {
-        *value = (*item)->m_Value.m_String;
+    case KEYTYPE_INT:
+        item = const_cast<HashTable*>(this)->Find(key.m_Int, &slot, &hash);
+        break;
+    /*case KEYTYPE_DOUBLE:
+        item = const_cast<HashTable*>(this)->Find(key.m_Double, &slot, &hash);
+        break;*/
+    case KEYTYPE_BLOB:
+        item = const_cast<HashTable*>(this)->Find(key.m_Blob, &slot, &hash);
+        break;
+    default:
+        item = NULL;
+        break;
+    }
+
+    if(*item)
+    {
+        *value = (*item)->m_Value;
+        *valueType = (*item)->m_ValType;
         return true;
     }
 
@@ -438,11 +591,27 @@ HbDict::Find(const HbString* key, const HbString** value) const
 }
 
 bool
-HbDict::Find(const HbString* key, s64* value) const
+HashTable::Find(const Blob* key, const Blob** value) const
 {
     Slot* slot;
-    HbDictItem** item = const_cast<HbDict*>(this)->Find(key, &slot);
-    if(*item && (*item)->m_ValType == HB_VALUETYPE_INT)
+    u32 hash;
+    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
+    if(*item && (*item)->m_ValType == VALUETYPE_BLOB)
+    {
+        *value = (*item)->m_Value.m_Blob;
+        return true;
+    }
+
+    return false;
+}
+
+bool
+HashTable::Find(const Blob* key, s64* value) const
+{
+    Slot* slot;
+    u32 hash;
+    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
+    if(*item && (*item)->m_ValType == VALUETYPE_INT)
     {
         *value = (*item)->m_Value.m_Int;
         return true;
@@ -452,13 +621,14 @@ HbDict::Find(const HbString* key, s64* value) const
 }
 
 bool
-HbDict::Find(const s64 key, const HbString** value) const
+HashTable::Find(const s64 key, const Blob** value) const
 {
     Slot* slot;
-    HbDictItem** item = const_cast<HbDict*>(this)->Find(key, &slot);
-    if(*item && (*item)->m_ValType == HB_VALUETYPE_STRING)
+    u32 hash;
+    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
+    if(*item && (*item)->m_ValType == VALUETYPE_BLOB)
     {
-        *value = (*item)->m_Value.m_String;
+        *value = (*item)->m_Value.m_Blob;
         return true;
     }
 
@@ -466,11 +636,12 @@ HbDict::Find(const s64 key, const HbString** value) const
 }
 
 bool
-HbDict::Find(const s64 key, s64* value) const
+HashTable::Find(const s64 key, s64* value) const
 {
     Slot* slot;
-    HbDictItem** item = const_cast<HbDict*>(this)->Find(key, &slot);
-    if(*item && (*item)->m_ValType == HB_VALUETYPE_INT)
+    u32 hash;
+    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
+    if(*item && (*item)->m_ValType == VALUETYPE_INT)
     {
         *value = (*item)->m_Value.m_Int;
         return true;
@@ -480,51 +651,69 @@ HbDict::Find(const s64 key, s64* value) const
 }
 
 bool
-HbDict::Merge(const HbString* key, const HbString* value, const size_t mergeOffset)
+HashTable::Patch(const Key key, const KeyType keyType,
+                const Blob* value, const size_t offset)
+{
+    switch(keyType)
+    {
+    case KEYTYPE_INT:
+        return Patch(key.m_Int, value, offset);
+    /*case KEYTYPE_DOUBLE:
+        return Patch(key.m_Double, value, offset);*/
+    case KEYTYPE_BLOB:
+        return Patch(key.m_Blob, value, offset);
+    }
+
+    return false;
+}
+
+bool
+HashTable::Patch(const Blob* key, const Blob* value, const size_t offset)
 {
     Slot* slot;
-    HbDictItem** pOldItem = Find(key, &slot);
+    u32 hash;
+    HtItem** pOldItem = Find(key, &slot, &hash);
 
     if(*pOldItem)
     {
-        if(hbverify(HB_VALUETYPE_STRING == (*pOldItem)->m_ValType))
+        if(hbverify(VALUETYPE_BLOB == (*pOldItem)->m_ValType))
         {
             byte* oldData;
-            const byte* mergeData;
-            const size_t oldLen = (*pOldItem)->m_Value.m_String->GetData(&oldData);
-            const size_t mergeLen = value->GetData(&mergeData);
-            if(mergeOffset + mergeLen <= oldLen)
+            const byte* patchData;
+            const size_t oldLen = (*pOldItem)->m_Value.m_Blob->GetData(&oldData);
+            const size_t patchLen = value->GetData(&patchData);
+            if(offset + patchLen <= oldLen)
             {
-                //New data will be merged within the bounds of
+                //New data will be patched within the bounds of
                 //the old data.
 
-                //Use memmove because mergeItem and oldItem could be
+                //Use memmove because value and oldItem could be
                 //the same item.
-                memmove(&oldData[mergeOffset], mergeData, mergeLen);
+                memmove(&oldData[offset], patchData, patchLen);
             }
             else
             {
                 //New data extends past the end of the old data.
 
-                const size_t newLen = mergeOffset + mergeLen;
-                HbString* newStr = HbString::Create(newLen);
+                const size_t newLen = offset + patchLen;
+                Blob* newStr = Blob::Create(newLen);
                 if(newStr)
                 {
                     byte* newData;
                     newStr->GetData(&newData);
-                    if(mergeOffset < oldLen)
+                    if(offset < oldLen)
                     {
-                        memcpy(newData, oldData, mergeOffset);
+                        memcpy(newData, oldData, offset);
                     }
                     else
                     {
                         memcpy(newData, oldData, oldLen);
                     }
 
-                    memcpy(&newData[mergeOffset], mergeData, mergeLen);
+                    memcpy(&newData[offset], patchData, patchLen);
 
-                    HbString::Destroy((*pOldItem)->m_Value.m_String);
-                    (*pOldItem)->m_Value.m_String = newStr;
+                    Blob::Destroy((*pOldItem)->m_Value.m_Blob);
+                    (*pOldItem)->m_Value.m_Blob = newStr;
                 }
             }
 
@@ -535,17 +724,17 @@ HbDict::Merge(const HbString* key, const HbString* value, const size_t mergeOffs
     {
         //Item doesn't exist yet, create it.
 
-        const byte* mergeData;
-        const size_t mergeLen = value->GetData(&mergeData);
-        const size_t newLen = mergeOffset + mergeLen;
+        const byte* patchData;
+        const size_t patchLen = value->GetData(&patchData);
+        const size_t newLen = offset + patchLen;
 
-        HbDictItem* newItem = HbDictItem::CreateEmpty(key, newLen);
+        HtItem* newItem = HtItem::CreateEmpty(key, newLen);
 
         if(newItem)
         {
             byte* newData;
-            newItem->m_Value.m_String->GetData(&newData);
-            memcpy(&newData[mergeOffset], mergeData, mergeLen);
+            newItem->m_Value.m_Blob->GetData(&newData);
+            memcpy(&newData[offset], patchData, patchLen);
             Set(newItem);
             return true;
         }
@@ -555,51 +744,52 @@ HbDict::Merge(const HbString* key, const HbString* value, const size_t mergeOffs
 }
 
 bool
-HbDict::Merge(const s64 key, const HbString* value, const size_t mergeOffset)
+HashTable::Patch(const s64 key, const Blob* value, const size_t offset)
 {
     Slot* slot;
-    HbDictItem** pOldItem = Find(key, &slot);
+    u32 hash;
+    HtItem** pOldItem = Find(key, &slot, &hash);
 
     if(*pOldItem)
     {
-        if(hbverify(HB_VALUETYPE_STRING == (*pOldItem)->m_ValType))
+        if(hbverify(VALUETYPE_BLOB == (*pOldItem)->m_ValType))
         {
             byte* oldData;
-            const byte* mergeData;
-            const size_t oldLen = (*pOldItem)->m_Value.m_String->GetData(&oldData);
-            const size_t mergeLen = value->GetData(&mergeData);
-            if(mergeOffset + mergeLen <= oldLen)
+            const byte* patchData;
+            const size_t oldLen = (*pOldItem)->m_Value.m_Blob->GetData(&oldData);
+            const size_t patchLen = value->GetData(&patchData);
+            if(offset + patchLen <= oldLen)
             {
-                //New data will be merged within the bounds of
+                //New data will be patched within the bounds of
                 //the old data.
 
-                //Use memmove because mergeItem and oldItem could be
+                //Use memmove because value and oldItem could be
                 //the same item.
-                memmove(&oldData[mergeOffset], mergeData, mergeLen);
+                memmove(&oldData[offset], patchData, patchLen);
             }
             else
             {
                 //New data extends past the end of the old data.
 
-                const size_t newLen = mergeOffset + mergeLen;
-                HbString* newStr = HbString::Create(newLen);
+                const size_t newLen = offset + patchLen;
+                Blob* newStr = Blob::Create(newLen);
                 if(newStr)
                 {
                     byte* newData;
                     newStr->GetData(&newData);
-                    if(mergeOffset < oldLen)
+                    if(offset < oldLen)
                     {
-                        memcpy(newData, oldData, mergeOffset);
+                        memcpy(newData, oldData, offset);
                     }
                     else
                     {
                         memcpy(newData, oldData, oldLen);
                     }
 
-                    memcpy(&newData[mergeOffset], mergeData, mergeLen);
+                    memcpy(&newData[offset], patchData, patchLen);
 
-                    HbString::Destroy((*pOldItem)->m_Value.m_String);
-                    (*pOldItem)->m_Value.m_String = newStr;
+                    Blob::Destroy((*pOldItem)->m_Value.m_Blob);
+                    (*pOldItem)->m_Value.m_Blob = newStr;
                 }
             }
 
@@ -610,17 +800,17 @@ HbDict::Merge(const s64 key, const HbString* value, const size_t mergeOffset)
     {
         //Item doesn't exist yet, create it.
 
-        const byte* mergeData;
-        const size_t mergeLen = value->GetData(&mergeData);
-        const size_t newLen = mergeOffset + mergeLen;
+        const byte* patchData;
+        const size_t patchLen = value->GetData(&patchData);
+        const size_t newLen = offset + patchLen;
 
-        HbDictItem* newItem = HbDictItem::CreateEmpty(key, newLen);
+        HtItem* newItem = HtItem::CreateEmpty(key, newLen);
 
         if(newItem)
         {
             byte* newData;
-            newItem->m_Value.m_String->GetData(&newData);
-            memcpy(&newData[mergeOffset], mergeData, mergeLen);
+            newItem->m_Value.m_Blob->GetData(&newData);
+            memcpy(&newData[offset], patchData, patchLen);
             Set(newItem);
             return true;
         }
@@ -630,7 +820,7 @@ HbDict::Merge(const s64 key, const HbString* value, const size_t mergeOffset)
 }
 
 size_t
-HbDict::Count() const
+HashTable::Count() const
 {
     return m_Count;
 }
@@ -638,17 +828,19 @@ HbDict::Count() const
 //private:
 
 u32
-HbDict::HashString(const byte* string, const size_t stringLen) const
+HashTable::HashBytes(const byte* bytes, const size_t len) const
 {
-    return FnvHashBufInitVal(string, stringLen, m_HashSalt);
+    //return FnvHashBufInitVal(bytes, len, m_HashSalt);
+
+    return MurmurHash2(bytes, len, m_HashSalt);
 }
 
 void
-HbDict::Set(HbDictItem* newItem)
+HashTable::Set(HtItem* newItem)
 {
     if(m_Count >= m_NumSlots*2)
     {
-        Slot* newSlots = (Slot*) HbHeap::ZAlloc(m_NumSlots * 2 * sizeof(Slot));
+        Slot* newSlots = (Slot*) Heap::ZAlloc(m_NumSlots * 2 * sizeof(Slot));
         if(newSlots)
         {
             Slot* oldSlots = m_Slots[0];
@@ -658,10 +850,10 @@ HbDict::Set(HbDictItem* newItem)
 
             for(int i = 0; i < (int)oldNumSlots; ++i)
             {
-                HbDictItem* item = oldSlots[i].m_Item;
+                HtItem* item = oldSlots[i].m_Item;
                 while(item)
                 {
-                    HbDictItem* next = item->m_Next;
+                    HtItem* next = item->m_Next;
                     item->m_Next = NULL;
 
                     bool replaced;
@@ -672,7 +864,7 @@ HbDict::Set(HbDictItem* newItem)
                 }
             }
 
-            HbHeap::Free(oldSlots);
+            Heap::Free(oldSlots);
         }
     }
 
@@ -686,18 +878,19 @@ HbDict::Set(HbDictItem* newItem)
 }
 
 void
-HbDict::Set(HbDictItem* newItem, bool* replaced)
+HashTable::Set(HtItem* newItem, bool* replaced)
 {
     Slot* slot;
-    HbDictItem** pitem;
+    u32 hash;
+    HtItem** pitem;
 
     switch(newItem->m_KeyType)
     {
-    case HB_VALUETYPE_STRING:
-        pitem = Find(newItem->m_Key.m_String, &slot);
+    case KEYTYPE_BLOB:
+        pitem = Find(newItem->m_Key.m_Blob, &slot, &hash);
         break;
-    case HB_VALUETYPE_INT:
-        pitem = Find(newItem->m_Key.m_Int, &slot);
+    case KEYTYPE_INT:
+        pitem = Find(newItem->m_Key.m_Int, &slot, &hash);
         break;
     default:
         pitem = NULL;
@@ -714,29 +907,32 @@ HbDict::Set(HbDictItem* newItem, bool* replaced)
     }
     else
     {
-        HbDictItem::Destroy(*pitem);
+        HtItem::Destroy(*pitem);
         *replaced = true;
     }
 
     *pitem = newItem;
+    (*pitem)->m_Hash = hash;
 }
 
-HbDictItem**
-HbDict::Find(const HbString* key, Slot** slot)
+HtItem**
+HashTable::Find(const Blob* key, Slot** slot, u32* hash)
 {
-    HbDictItem** item = NULL;
+    HtItem** item = NULL;
     const byte* keyData;
     const size_t keylen = key->GetData(&keyData);
-    const u32 hash = HashString(keyData, keylen);
+    *hash = HashBytes(keyData, keylen);
     for(int i = 0; i < 2 && m_Slots[i]; ++i)
     {
-        const unsigned idx = hash & (m_NumSlots-1);
+        const unsigned idx = *hash & (m_NumSlots-1);
         *slot = &m_Slots[i][idx];
         item = &(*slot)->m_Item;
 
         for(; *item; item = &(*item)->m_Next)
         {
-            if((*item)->m_Key.m_String->EQ(keyData, keylen))
+            if(*hash == (*item)->m_Hash
+                && KEYTYPE_BLOB == (*item)->m_KeyType
+                 && (*item)->m_Key.m_Blob->EQ(key))
             {
                 return item;
             }
@@ -746,20 +942,21 @@ HbDict::Find(const HbString* key, Slot** slot)
     return item;
 }
 
-HbDictItem**
-HbDict::Find(const s64 key, Slot** slot)
+HtItem**
+HashTable::Find(const s64 key, Slot** slot, u32* hash)
 {
-    HbDictItem** item = NULL;
-    const u32 hash = HashString((const byte*)&key, sizeof(key));
+    HtItem** item = NULL;
+    *hash = HashBytes((const byte*)&key, sizeof(key));
     for(int i = 0; i < 2 && m_Slots[i]; ++i)
     {
-        const unsigned idx = hash & (m_NumSlots-1);
+        const unsigned idx = *hash & (m_NumSlots-1);
         *slot = &m_Slots[i][idx];
         item = &(*slot)->m_Item;
 
         for(; *item; item = &(*item)->m_Next)
         {
-            if((*item)->m_Key.m_Int == key)
+            if(KEYTYPE_INT == (*item)->m_KeyType
+                && (*item)->m_Key.m_Int == key)
             {
                 return item;
             }
@@ -769,369 +966,4 @@ HbDict::Find(const s64 key, Slot** slot)
     return item;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-//  HbDictTest
-///////////////////////////////////////////////////////////////////////////////
-static ptrdiff_t myrandom (ptrdiff_t i)
-{
-    return HbRand()%i;
-}
-
-void
-HbDictTest::TestStringString(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-    char keyBuf[32];
-    byte hbsBuf[32];
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        dict->Set(key, key);
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        const HbString* value;
-
-        hbverify(dict->Find(key, &value));
-        hbverify(value->EQ(key));
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        const HbString* value;
-
-        hbverify(dict->Clear(key));
-        hbverify(!dict->Find(key, &value));
-    }
-
-    hbverify(0 == dict->Count());
-
-    HbDict::Destroy(dict);
-}
-
-void
-HbDictTest::TestStringInt(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-    char keyBuf[32];
-    byte hbsBuf[32];
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        dict->Set(key, (s64)i);
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        s64 value;
-
-        hbverify(dict->Find(key, &value));
-        hbverify(i == value);
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        sprintf(keyBuf, "foo%d", i);
-        HbString* key = HbString::Encode((byte*)keyBuf, strlen(keyBuf), hbsBuf, sizeof(hbsBuf));
-        s64 value;
-
-        hbverify(dict->Clear(key));
-        hbverify(!dict->Find(key, &value));
-    }
-
-    hbverify(0 == dict->Count());
-
-    HbDict::Destroy(dict);
-}
-
-void
-HbDictTest::TestIntInt(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        dict->Set(i, (s64)i);
-    }
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        s64 value;
-        hbverify(dict->Find(i, &value));
-        hbverify((s64)i == value);
-    }
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        s64 value;
-        hbverify(dict->Clear(i));
-        hbverify(!dict->Find(i, &value));
-    }
-
-    hbverify(0 == dict->Count());
-
-    HbDict::Destroy(dict);
-}
-
-void
-HbDictTest::TestIntString(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-    char valBuf[32];
-    byte hbsBuf[32];
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        sprintf(valBuf, "foo%d", i);
-        HbString* value = HbString::Encode((byte*)valBuf, strlen(valBuf), hbsBuf, sizeof(hbsBuf));
-        dict->Set(i, value);
-    }
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        sprintf(valBuf, "foo%d", i);
-        const HbString* value;
-
-        hbverify(dict->Find(i, &value));
-        hbverify(value->EQ(HbString::Encode((byte*)valBuf, strlen(valBuf), hbsBuf, sizeof(hbsBuf))));
-    }
-
-    for(s64 i = 0; i < numKeys; ++i)
-    {
-        hbverify(dict->Clear(i));
-        const HbString* value;
-        hbverify(!dict->Find(i, &value));
-    }
-
-    hbverify(0 == dict->Count());
-
-    HbDict::Destroy(dict);
-}
-
-struct KV_int_string
-{
-    static const int SECTION_LEN    = 256;
-    int m_Key;
-    unsigned m_FinalLen;
-    char m_Test[SECTION_LEN*3];
-};
-void
-HbDictTest::TestMergeIntKeys(const int numKeys, const int numIterations)
-{
-    static const char alphabet[] =
-    {
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-        "abcdefghijklmnopqrstuvwxyz"
-    };
-
-    HbDict* dict = HbDict::Create();
-
-    //Create random length strings, with random offsets
-    KV_int_string* kv = new KV_int_string[numKeys];
-    memset(kv, 0, numKeys*sizeof(*kv));
-
-    KV_int_string* p = kv;
-    for(int i = 0; i < numKeys; ++i, ++p)
-    {
-        p->m_Key = i;
-    }
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    for(int iter = 0; iter < numIterations; ++iter)
-    {
-        p = kv;
-        for(int i = 0; i < numKeys; ++i, ++p)
-        {
-            const unsigned offset = HbRand(0, KV_int_string::SECTION_LEN-1);
-            const unsigned len = HbRand(1, KV_int_string::SECTION_LEN);
-            if(offset+len > p->m_FinalLen)
-            {
-                p->m_FinalLen = offset + len;
-            }
-
-            const unsigned abOffset = HbRand() % (sizeof(alphabet) - len);
-            byte hbsBuf[KV_int_string::SECTION_LEN*2];
-            const HbString* value =
-                HbString::Encode((byte*)&alphabet[abOffset], len,
-                                    hbsBuf, sizeof(hbsBuf));
-
-            hbverify(dict->Merge(p->m_Key, value, offset));
-
-            memcpy(&p->m_Test[offset], &alphabet[abOffset], len);
-        }
-
-        //std::random_shuffle(&kv[0], &kv[numKeys]);
-
-        //Check they've been added
-        p = kv;
-        for(int i = 0; i < numKeys; ++i, ++p)
-        {
-            const HbString* value;
-            hbverify(dict->Find(p->m_Key, &value));
-            const byte* data;
-            const size_t len = value->GetData(&data);
-            hbverify(len == p->m_FinalLen);
-            hbverify(0 == memcmp(data, p->m_Test, p->m_FinalLen));
-        }
-    }
-
-    //Delete the items
-    p = kv;
-    for(int i = 0; i < numKeys; ++i, ++p)
-    {
-        const HbString* value;
-        hbverify(dict->Clear(p->m_Key));
-        hbverify(!dict->Find(p->m_Key, &value));
-    }
-
-    hbverify(0 == dict->Count());
-
-    HbDict::Destroy(dict);
-
-    delete [] kv;
-}
-
-void
-HbDictTest::CreateRandomKeys(KV* kv, const int numKeys)
-{
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Key = i;
-    }
-    std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
-}
-
-void
-HbDictTest::AddRandomKeys(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-    s64 value;
-
-    HbStopWatch sw;
-
-    KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Value = i;
-        const bool added = dict->Set(kv[i].m_Key, (s64)kv[i].m_Value);
-        if(added)
-        {
-            hbverify(dict->Find(kv[i].m_Key, &value));
-            hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();
-    s_Log.Debug("set: %f", sw.GetElapsed());
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        const bool found = dict->Find(kv[i].m_Key, &value);
-        hbassert(found);
-        hbverify(value == kv[i].m_Value);
-    }
-    sw.Stop();
-    s_Log.Debug("find: %f", sw.GetElapsed());
-    
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-    hbassert(dict->Find(kv[i].m_Key, &value));
-    hbassert(value == kv[i].m_Value);
-    }
-    sw.Stop();*/
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        const bool cleared =dict->Clear(kv[i].m_Key);
-        hbassert(cleared);
-    }
-    sw.Stop();
-    s_Log.Debug("delete: %f", sw.GetElapsed());
-
-    HbDict::Destroy(dict);
-    delete [] kv;
-}
-void
-HbDictTest::AddDeleteRandomKeys(const int numKeys)
-{
-    HbDict* dict = HbDict::Create();
-    s64 value;
-
-    KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys);
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Value = i;
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        int idx = HbRand() % numKeys;
-        if(!kv[idx].m_Added)
-        {
-            const bool added = dict->Set(kv[i].m_Key, (s64)kv[i].m_Value);
-            if(added)
-            {
-                kv[idx].m_Added = true;
-                hbverify(dict->Find(kv[idx].m_Key, &value));
-                hbverify(value == kv[idx].m_Value);
-            }
-        }
-        else
-        {
-            const bool cleared = dict->Clear(kv[idx].m_Key);
-            hbassert(cleared);
-            kv[idx].m_Added = false;
-            hbverify(!dict->Find(kv[idx].m_Key, &value));
-        }
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        if(kv[i].m_Added)
-        {
-            const bool found = dict->Find(kv[i].m_Key, &value);
-            hbassert(found);
-            hbverify(value == kv[i].m_Value);
-        }
-        else
-        {
-            const bool found = dict->Find(kv[i].m_Key, &value);
-            hbassert(!found);
-        }
-    }
-
-    HbDict::Destroy(dict);
-    delete [] kv;
-}
-
-
+}   //namespace honeybase

@@ -3,60 +3,71 @@
 
 #include "hb.h"
 
-class HbDictItem
+namespace honeybase
 {
-    friend class HbDict;
+
+class HtItem
+{
+    friend class HashTable;
 private:
 
-    static HbDictItem* Create(const HbString* key, const HbString* value);
-    static HbDictItem* Create(const HbString* key, const s64 value);
-    static HbDictItem* Create(const HbString* key, const double value);
-    static HbDictItem* Create(const s64 key, const HbString* value);
-    static HbDictItem* Create(const s64 key, const s64 value);
-    static HbDictItem* Create(const s64 key, const double value);
-    static HbDictItem* CreateEmpty(const HbString* key, const size_t len);
-    static HbDictItem* CreateEmpty(const s64 key, const size_t len);
-    static void Destroy(HbDictItem* item);
+    static HtItem* Create(const Blob* key, const Blob* value);
+    static HtItem* Create(const Blob* key, const s64 value);
+    static HtItem* Create(const Blob* key, const double value);
+    static HtItem* Create(const s64 key, const Blob* value);
+    static HtItem* Create(const s64 key, const s64 value);
+    static HtItem* Create(const s64 key, const double value);
+    static HtItem* CreateEmpty(const Blob* key, const size_t len);
+    static HtItem* CreateEmpty(const s64 key, const size_t len);
+    static void Destroy(HtItem* item);
 
-    HbKey m_Key;
-    HbValue m_Value;
-    HbDictItem* m_Next;
+    Key m_Key;
+    Value m_Value;
+    HtItem* m_Next;
+    u32 m_Hash;
 
-    HbKeyType m_KeyType : 4;
-    HbValueType m_ValType : 4;
+    KeyType m_KeyType : 4;
+    ValueType m_ValType : 4;
 
 private:
 
-    static HbDictItem* Create();
+    static HtItem* Create();
 
-    HbDictItem();
-    ~HbDictItem();
-    HbDictItem(const HbDictItem&);
-    HbDictItem& operator=(const HbDictItem&);
+    HtItem();
+    ~HtItem();
+    HtItem(const HtItem&);
+    HtItem& operator=(const HtItem&);
 };
 
-class HbDict
+class HashTable
 {
 public:
 
-    static HbDict* Create();
-    static void Destroy(HbDict* dict);
+    static HashTable* Create();
+    static void Destroy(HashTable* dict);
 
-    bool Set(const HbString* key, const HbString* value);
-    bool Set(const HbString* key, const s64 value);
-    bool Set(const s64 key, const HbString* value);
+    bool Set(const Key key, const KeyType keyType,
+            const Value value, const ValueType valueType);
+    bool Set(const Blob* key, const Blob* value);
+    bool Set(const Blob* key, const s64 value);
+    bool Set(const s64 key, const Blob* value);
     bool Set(const s64 key, const s64 value);
 
+    bool Clear(const Key key, const KeyType keyType);
 	bool Clear(const s64 key);
-	bool Clear(const HbString* key);
+	bool Clear(const Blob* key);
 
-    bool Find(const HbString* key, const HbString** value) const;
-    bool Find(const HbString* key, s64* value) const;
-    bool Find(const s64 key, const HbString** value) const;
+    bool Find(const Key key, const KeyType keyType,
+                Value* value, ValueType* valueType);
+    bool Find(const Blob* key, const Blob** value) const;
+    bool Find(const Blob* key, s64* value) const;
+    bool Find(const s64 key, const Blob** value) const;
     bool Find(const s64 key, s64* value) const;
 
-    bool Merge(const HbString* key, const HbString* value, const size_t mergeOffset);
-    bool Merge(const s64 key, const HbString* value, const size_t mergeOffset);
+    bool Patch(const Key key, const KeyType keyType,
+                const Blob* value, const size_t offset);
+    bool Patch(const Blob* key, const Blob* value, const size_t offset);
+    bool Patch(const s64 key, const Blob* value, const size_t offset);
 
     size_t Count() const;
 
@@ -71,17 +82,17 @@ private:
 		{
 		}
 
-		HbDictItem* m_Item;
+		HtItem* m_Item;
 		int m_Count;
 	};
 
-	u32 HashString(const byte* string, const size_t stringLen) const;
+	u32 HashBytes(const byte* bytes, const size_t len) const;
 
-    void Set(HbDictItem* item);
-    void Set(HbDictItem* item, bool* replaced);
+    void Set(HtItem* item);
+    void Set(HtItem* item, bool* replaced);
     
-    HbDictItem** Find(const HbString* key, Slot** slot);
-    HbDictItem** Find(const s64 key, Slot** slot);
+    HtItem** Find(const Blob* key, Slot** slot, u32* hash);
+    HtItem** Find(const s64 key, Slot** slot, u32* hash);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
@@ -91,44 +102,12 @@ private:
     size_t m_NumSlots;
 	u32 m_HashSalt;
 
-    HbDict();
-    ~HbDict();
-    HbDict(const HbDict&);
-    HbDict& operator=(const HbDict&);
+    HashTable();
+    ~HashTable();
+    HashTable(const HashTable&);
+    HashTable& operator=(const HashTable&);
 };
 
-class HbDictTest
-{
-public:
-    struct KV
-    {
-        int m_Key;
-        int m_Value;
-        bool m_Added : 1;
-
-        KV()
-        : m_Added(false)
-        {
-        }
-
-        bool operator<(const KV& a) const
-        {
-            return m_Key < a.m_Key;
-        }
-    };
-
-    static void TestStringString(const int numKeys);
-    static void TestStringInt(const int numKeys);
-    static void TestIntInt(const int numKeys);
-    static void TestIntString(const int numKeys);
-
-    static void TestMergeIntKeys(const int numKeys, const int numIterations);
-
-    static void CreateRandomKeys(KV* kv, const int numKeys);
-
-    static void AddRandomKeys(const int numKeys);
-
-    static void AddDeleteRandomKeys(const int numKeys);
-};
+}   //namespace honeybase
 
 #endif  //__HB_DICT_H__

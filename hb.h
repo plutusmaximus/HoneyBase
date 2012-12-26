@@ -1,6 +1,7 @@
 #ifndef __HB_H__
 #define __HB_H__
 
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdint.h>
 #include <stddef.h>
 
@@ -9,6 +10,9 @@
 #ifdef __GNUC__
 #include <inttypes.h>
 #endif
+
+namespace honeybase
+{
 
 #if _MSC_VER
 #define snprintf _snprintf
@@ -51,66 +55,57 @@ typedef u8          byte;
 
 #define hb_static_assert(cond) typedef char static_assertion_##__LINE__[(cond)?1:-1]
 
-unsigned HbRand();
-unsigned HbRand(const unsigned min, const unsigned max);
+unsigned Rand();
+unsigned Rand(const unsigned min, const unsigned max);
 
-template<typename T, int BITSIZE, int ARRAYSIZE>
-class HbBitFieldArray
+size_t Base64Encode(const byte* bytes, const size_t numBytes, char* buf, const size_t bufSize);
+
+enum KeyType
+{
+    KEYTYPE_INT,
+    KEYTYPE_DOUBLE,
+    KEYTYPE_BLOB
+};
+
+enum ValueType
+{
+    VALUETYPE_INT,
+    VALUETYPE_DOUBLE,
+    VALUETYPE_BLOB,
+    VALUETYPE_CONTAINER
+};
+
+enum ContainerType
+{
+    CONTAINERTYPE_HASHTABLE,
+    CONTAINERTYPE_BTREE,
+    CONTAINERTYPE_SKIPLIST,
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//  Blob
+///////////////////////////////////////////////////////////////////////////////
+class Container
+{
+    ContainerType m_ContainerType;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+//  Blob
+///////////////////////////////////////////////////////////////////////////////
+class Blob
 {
 public:
 
-    T& operator[](const int index)
-    {
-        const size_t offset = index*BITSIZE;
-        const byte b = m_Bits[offset>>3];
-    }
+    static Blob* Create(const size_t stringLen);
+    static Blob* Create(const byte* string, const size_t stringLen);
+    static Blob* Dup(const Blob* string);
+    static void Destroy(Blob* hbs);
 
-    byte m_Bits[((ARRAYSIZE * BITSIZE) + BITSIZE - 1) / 8];
-};
-
-enum HbKeyType
-{
-    HB_KEYTYPE_INVALID,
-    HB_KEYTYPE_INT,
-    HB_KEYTYPE_DOUBLE,
-    HB_KEYTYPE_STRING
-};
-
-enum HbValueType
-{
-    HB_VALUETYPE_INVALID,
-    HB_VALUETYPE_INT,
-    HB_VALUETYPE_DOUBLE,
-    HB_VALUETYPE_STRING,
-    HB_VALUETYPE_CONTAINER
-};
-
-class HbDict;
-class HbSkipList;
-
-///////////////////////////////////////////////////////////////////////////////
-//  HbString
-///////////////////////////////////////////////////////////////////////////////
-class HbString
-{
-public:
-
-    static HbString* Create(const size_t stringLen);
-    static HbString* Create(const byte* string, const size_t stringLen);
-    static HbString* Dup(const HbString* string);
-    static void Destroy(HbString* hbs);
-
-    static HbString* Encode(const byte* src, const size_t srcLen,
+    static Blob* Encode(const byte* src, const size_t srcLen,
                             byte* dst, const size_t dstSize);
 
-    static size_t GetData(const byte* hbs, const byte** data);
-    static size_t GetData(byte* hbs, byte** data);
-
-    static size_t Length(const byte* hbs);
-
-    static size_t Size(const byte* hbs);
-
-    static size_t Size(const size_t stringLen);
+    static size_t Size(const size_t len);
 
     size_t GetData(const byte** data) const;
     size_t GetData(byte** data);
@@ -119,83 +114,60 @@ public:
 
     size_t Size() const;
 
-    HbString* Dup() const;
+    Blob* Dup() const;
 
-    int Compare(const HbString* that) const
-    {
-        const byte* thatData;
-        const size_t thatLen = that->GetData(&thatData);
-        return Compare(thatData, thatLen);
-    }
-    int Compare(const byte* thatData, const size_t thatLen) const;
+    int Compare(const Blob* that) const;
 
-    bool EQ(const HbString* that) const
+    bool EQ(const Blob* that) const
     {
         return Compare(that) == 0;
     }
-    bool EQ(const byte* thatData, const size_t thatLen) const
-    {
-        return Compare(thatData, thatLen) == 0;
-    }
 
-    bool LT(const HbString* that) const
+    bool LT(const Blob* that) const
     {
         return Compare(that) < 0;
     }
-    bool LT(const byte* thatData, const size_t thatLen) const
-    {
-        return Compare(thatData, thatLen) < 0;
-    }
 
-    bool GT(const HbString* that) const
+    bool GT(const Blob* that) const
     {
         return Compare(that) > 0;
     }
-    bool GT(const byte* thatData, const size_t thatLen) const
-    {
-        return Compare(thatData, thatLen) > 0;
-    }
 
-    bool LE(const HbString* that) const
+    bool LE(const Blob* that) const
     {
         return Compare(that) <= 0;
     }
-    bool LE(const byte* thatData, const size_t thatLen) const
-    {
-        return Compare(thatData, thatLen) <= 0;
-    }
 
-    bool GE(const HbString* that) const
+    bool GE(const Blob* that) const
     {
         return Compare(that) >= 0;
-    }
-    bool GE(const byte* thatData, const size_t thatLen) const
-    {
-        return Compare(thatData, thatLen) >= 0;
     }
 
 protected:
 
-    static void Init(HbString* hbs, const byte* bytes, const size_t size);
+    static void Init(Blob* hbs, const byte* bytes, const size_t size);
 
 private:
 
     byte bytes[1];
 
-    HbString(){};
-    ~HbString(){}
-    HbString(const HbString&);
-    HbString& operator=(const HbString&);
+    Blob(){};
+    ~Blob(){}
+    Blob(const Blob&);
+    Blob& operator=(const Blob&);
 };
 
-class HbKey
+///////////////////////////////////////////////////////////////////////////////
+//  Key
+///////////////////////////////////////////////////////////////////////////////
+class Key
 {
 public:
     union
     {
         s64 m_Int;
         double m_Double;
-        HbString* m_String;
+        Blob* m_Blob;
     };
 
     void Set(const s64 value)
@@ -208,75 +180,77 @@ public:
         m_Double = value;
     }
 
-    void Set(const HbString* value)
+    void Set(const Blob* value)
     {
-        m_String = value->Dup();
+        m_Blob = value->Dup();
     }
 
-    int Compare(const HbKeyType keyType, const HbKey& that) const
+    int Compare(const KeyType keyType, const Key& that) const
     {
         switch(keyType)
         {
-            case HB_KEYTYPE_INT:
-            case HB_KEYTYPE_DOUBLE:
+            case KEYTYPE_INT:
+            case KEYTYPE_DOUBLE:
                 return int(m_Int - that.m_Int);
             break;
-            case HB_KEYTYPE_STRING:
-                return m_String->Compare(that.m_String);
+            case KEYTYPE_BLOB:
+                return m_Blob->Compare(that.m_Blob);
             break;
         }
 
         return -1;
     }
 
-    bool EQ(const HbKeyType keyType, const HbKey& that) const
+    bool EQ(const KeyType keyType, const Key& that) const
     {
         return Compare(keyType, that) == 0;
     }
 
-    bool LT(const HbKeyType keyType, const HbKey& that) const
+    bool LT(const KeyType keyType, const Key& that) const
     {
         return Compare(keyType, that) < 0;
     }
 
-    bool GT(const HbKeyType keyType, const HbKey& that) const
+    bool GT(const KeyType keyType, const Key& that) const
     {
         return Compare(keyType, that) > 0;
     }
 
-    bool LE(const HbKeyType keyType, const HbKey& that) const
+    bool LE(const KeyType keyType, const Key& that) const
     {
         return Compare(keyType, that) <= 0;
     }
 
-    bool GE(const HbKeyType keyType, const HbKey& that) const
+    bool GE(const KeyType keyType, const Key& that) const
     {
         return Compare(keyType, that) >= 0;
     }
 };
 
-class HbValue
+///////////////////////////////////////////////////////////////////////////////
+//  Value
+///////////////////////////////////////////////////////////////////////////////
+class Value
 {
 public:
     union
     {
         s64 m_Int;
         double m_Double;
-        HbString* m_String;
-        HbDict* m_Dict;
-        HbSkipList* m_SkipList;
+        Blob* m_Blob;
+        Container* m_Container;
     };
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbLog
+//  Log
 ///////////////////////////////////////////////////////////////////////////////
-class HbLog
+class Log
 {
 public:
 
-    HbLog();
-    explicit HbLog(const char* channel);
+    Log();
+    explicit Log(const char* channel);
 
     void Debug(const char* fmt, ...);
     void Error(const char* fmt, ...);
@@ -287,9 +261,9 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-//  HbHeap
+//  Heap
 ///////////////////////////////////////////////////////////////////////////////
-class HbHeap
+class Heap
 {
 public:
 
@@ -298,17 +272,17 @@ public:
 	static void Free(void* mem);
 };
 
-class HbStringTest
+class BlobTest
 {
 public:
 
     static void Test();
 };
 
-class HbStopWatch
+class StopWatch
 {
 public:
-    HbStopWatch();
+    StopWatch();
 
     void Restart();
     void Stop();
@@ -323,5 +297,6 @@ private:
     bool m_Running  : 1;
 };
 
+}   //namespace honeybase
 
 #endif  //__HB_H__

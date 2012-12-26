@@ -3,14 +3,17 @@
 
 #include "hb.h"
 
-class HbBTreeNode;
-
-class HbIterator
+namespace honeybase
 {
-    friend class HbBTree;
+
+class BTreeNode;
+
+class BTreeIterator
+{
+    friend class BTree;
 public:
-    HbIterator();
-    ~HbIterator();
+    BTreeIterator();
+    ~BTreeIterator();
 
     void Clear();
 
@@ -19,43 +22,45 @@ public:
 
     bool Next();
 
-    HbKey GetKey();
-    s64 GetValue();
+    Key GetKey();
+    Value GetValue();
+    ValueType GetValueType();
 
 private:
 
-    HbBTreeNode* m_Cur;
+    BTreeNode* m_Cur;
     int m_ItemIndex;
 };
 
-class HbBTreeItem
+class BTreeItem
 {
 public:
 
     union
     {
-        s64 m_Int;
-        HbString* m_String;
-        HbBTreeNode* m_Node;
+        Value m_Value;
+        BTreeNode* m_Node;
     };
+
+    ValueType m_ValueType;
 };
 
-class HbBTreeNode
+class BTreeNode
 {
 public:
 
     static const int MAX_KEYS = 96;
 
-    HbBTreeNode* m_Prev;
+    BTreeNode* m_Prev;
 
     int m_NumKeys;
     const int m_MaxKeys;
 
     //FRACNODES
-    HbKey* m_Keys;
-    HbBTreeItem m_Items[1];
-    //HbKey m_Keys[MAX_KEYS];
-    //HbBTreeItem m_Items[MAX_KEYS+1];
+    Key* m_Keys;
+    BTreeItem m_Items[1];
+    //Key m_Keys[MAX_KEYS];
+    //BTreeItem m_Items[MAX_KEYS+1];
 
     inline bool IsFull() const
     {
@@ -63,30 +68,30 @@ public:
     }
 
 private:
-    HbBTreeNode();
-    ~HbBTreeNode();
-    HbBTreeNode(const HbBTreeNode&);
-    HbBTreeNode& operator=(const HbBTreeNode&);
+    BTreeNode();
+    ~BTreeNode();
+    BTreeNode(const BTreeNode&);
+    BTreeNode& operator=(const BTreeNode&);
 };
 
-class HbBTree
+class BTree
 {
 public:
 
-    static HbBTree* Create(const HbKeyType keyType);
-    static void Destroy(HbBTree* btree);
+    static BTree* Create(const KeyType keyType);
+    static void Destroy(BTree* btree);
 
-    bool Insert(const HbKey key, const s64 value);
+    bool Insert(const Key key, const Value value, const ValueType valueType);
 
-    bool Delete(const HbKey key);
+    bool Delete(const Key key);
 
     void DeleteAll();
 
-    bool Find(const HbKey key, s64* value) const;
+    bool Find(const Key key, Value* value, ValueType* valueType) const;
 
-    bool GetFirst(HbIterator* it);
+    bool GetFirst(BTreeIterator* it);
 
-    HbKeyType GetKeyType() const
+    KeyType GetKeyType() const
     {
         return m_KeyType;
     }
@@ -99,72 +104,47 @@ public:
 
 private:
 
-    bool Find(const HbKey key,
-            const HbBTreeNode** outNode,
+    bool Find(const Key key,
+            const BTreeNode** outNode,
             int* outKeyIdx,
-            const HbBTreeNode** outParent,
+            const BTreeNode** outParent,
             int* outParentKeyIdx) const;
-    bool Find(const HbKey key,
-            HbBTreeNode** outNode,
+    bool Find(const Key key,
+            BTreeNode** outNode,
             int* outKeyIdx,
-            HbBTreeNode** outParent,
+            BTreeNode** outParent,
             int* outParentKeyIdx);
 
-    void MergeLeft(HbBTreeNode* parent, const int keyIdx, const int count, const int depth);
-    void MergeRight(HbBTreeNode* parent, const int keyIdx, const int count, const int depth);
+    void MergeLeft(BTreeNode* parent, const int keyIdx, const int count, const int depth);
+    void MergeRight(BTreeNode* parent, const int keyIdx, const int count, const int depth);
 
-    void TrimNode(HbBTreeNode* node, const int depth);
+    void TrimNode(BTreeNode* node, const int depth);
 
-    void ValidateNode(const int depth, HbBTreeNode* node);
+    void ValidateNode(const int depth, BTreeNode* node);
 
-    HbBTreeNode* AllocNode(const int numKeys);
-    void FreeNode(HbBTreeNode* node);
+    BTreeNode* AllocNode(const int numKeys);
+    void FreeNode(BTreeNode* node);
 
-    static int Bound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
-    static int LowerBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
-    static int UpperBound(const HbKeyType keyType, const HbKey key, const HbKey* first, const HbKey* end);
+    static int Bound(const KeyType keyType, const Key key, const Key* first, const Key* end);
+    static int LowerBound(const KeyType keyType, const Key key, const Key* first, const Key* end);
+    static int UpperBound(const KeyType keyType, const Key key, const Key* first, const Key* end);
 
-    HbBTreeNode* m_Nodes;
+    BTreeNode* m_Nodes;
 
-    HbBTreeNode* m_Leaves;
+    BTreeNode* m_Leaves;
 
     u64 m_Count;
     u64 m_Capacity;
     int m_Depth;
-    const HbKeyType m_KeyType;
+    const KeyType m_KeyType;
 
-    explicit HbBTree(const HbKeyType keyType);
-    HbBTree();
-    ~HbBTree();
-    HbBTree(const HbBTree&);
-    HbBTree& operator=(const HbBTree&);
+    explicit BTree(const KeyType keyType);
+    BTree();
+    ~BTree();
+    BTree(const BTree&);
+    BTree& operator=(const BTree&);
 };
 
-class HbBTreeTest
-{
-public:
-    struct KV
-    {
-        HbKey m_Key;
-        s64 m_Value;
-        bool m_Added : 1;
-
-        KV()
-        : m_Added(false)
-        {
-        }
-
-        bool operator<(const KV& a) const
-        {
-            return m_Key.m_Int < a.m_Key.m_Int;
-        }
-    };
-
-    static void CreateRandomKeys(const HbKeyType keyType, KV* kv, const int numKeys, const bool unique, const int range);
-    static void AddRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending);
-    static void AddDups(const int numKeys, const int min, const int max);
-};
+}   //namespace honeybase
 
 #endif  //__HB_BTREE_H__
