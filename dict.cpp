@@ -125,149 +125,86 @@ static size_t s_NumDictItems;
 //  HtItem
 ///////////////////////////////////////////////////////////////////////////////
 HtItem*
-HtItem::Create(const Blob* key, const Blob* value)
+HtItem::Create(const Key key, const KeyType keyType,
+                const Value value, const ValueType valueType)
 {
     HtItem* item = Create();
     if(item)
     {
-        item->m_KeyType = KEYTYPE_BLOB;
+        item->m_KeyType = keyType;
+        item->m_ValType = valueType;
+
+        switch(keyType)
+        {
+            case KEYTYPE_INT:
+                item->m_Key.m_Int = key.m_Int;
+                break;
+            case KEYTYPE_DOUBLE:
+                item->m_Key.m_Double = key.m_Double;
+                break;
+            case KEYTYPE_BLOB:
+                item->m_Key.m_Blob = key.m_Blob->Dup();
+                if(NULL == item->m_Key.m_Blob)
+                {
+                    Destroy(item);
+                    return NULL;
+                }
+                break;
+            default:
+                Destroy(item);
+                return NULL;
+        }
+
+        switch(valueType)
+        {
+            case VALUETYPE_INT:
+                item->m_Value.m_Int = value.m_Int;
+                break;
+            case VALUETYPE_DOUBLE:
+                item->m_Value.m_Double = value.m_Double;
+                break;
+            case VALUETYPE_BLOB:
+                item->m_Value.m_Blob = value.m_Blob->Dup();
+                if(NULL == item->m_Value.m_Blob)
+                {
+                    Destroy(item);
+                    return NULL;
+                }
+                break;
+            default:
+                Destroy(item);
+                return NULL;
+        }
+    }
+
+    return item;
+}
+
+HtItem*
+HtItem::CreateEmpty(const Key key, const KeyType keyType, const size_t len)
+{
+    HtItem* item = Create();
+    if(item)
+    {
+        item->m_KeyType = keyType;
         item->m_ValType = VALUETYPE_BLOB;
-
-        if(NULL == (item->m_Key.m_Blob = key->Dup())
-            || NULL == (item->m_Value.m_Blob = value->Dup()))
-        {
-            Destroy(item);
-            item = NULL;
-        }
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::Create(const Blob* key, const s64 value)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_BLOB;
-        item->m_ValType = VALUETYPE_INT;
-        item->m_Value.m_Int = value;
-
-        if(NULL == (item->m_Key.m_Blob = key->Dup()))
-        {
-            Destroy(item);
-            item = NULL;
-        }
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::Create(const Blob* key, const double value)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_BLOB;
-        item->m_ValType = VALUETYPE_DOUBLE;
-        item->m_Value.m_Double = value;
-
-        if(NULL == (item->m_Key.m_Blob = key->Dup()))
-        {
-            Destroy(item);
-            item = NULL;
-        }
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::Create(const s64 key, const Blob* value)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_INT;
-        item->m_ValType = VALUETYPE_BLOB;
-        item->m_Key.m_Int = key;
-
-        if(NULL == (item->m_Value.m_Blob = value->Dup()))
-        {
-            Destroy(item);
-            item = NULL;
-        }
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::Create(const s64 key, const s64 value)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_INT;
-        item->m_ValType = VALUETYPE_INT;
-        item->m_Key.m_Int = key;
-        item->m_Value.m_Int = value;
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::Create(const s64 key, const double value)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_INT;
-        item->m_ValType = VALUETYPE_DOUBLE;
-        item->m_Key.m_Int = key;
-        item->m_Value.m_Double = value;
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::CreateEmpty(const Blob* key, const size_t len)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_BLOB;
-        item->m_ValType = VALUETYPE_BLOB;
-
-        if(NULL == (item->m_Key.m_Blob = key->Dup())
-            || NULL == (item->m_Value.m_Blob = Blob::Create(len)))
-        {
-            Destroy(item);
-            item = NULL;
-        }
-    }
-
-    return item;
-}
-
-HtItem*
-HtItem::CreateEmpty(const s64 key, const size_t len)
-{
-    HtItem* item = Create();
-    if(item)
-    {
-        item->m_KeyType = KEYTYPE_INT;
-        item->m_ValType = VALUETYPE_BLOB;
-        item->m_Key.m_Int = key;
 
         if(NULL == (item->m_Value.m_Blob = Blob::Create(len)))
         {
             Destroy(item);
             item = NULL;
+        }
+        else if(KEYTYPE_BLOB == keyType)
+        {
+            if(NULL == (item->m_Key.m_Blob = key.m_Blob->Dup()))
+            {
+                Destroy(item);
+                item = NULL;
+            }
+        }
+        else
+        {
+            item->m_Key = key;
         }
     }
 
@@ -396,95 +333,10 @@ HashTable::Destroy(HashTable* dict)
 }
 
 bool
-HashTable:: Set(const Key key, const KeyType keyType,
+HashTable::Set(const Key key, const KeyType keyType,
                 const Value value, const ValueType valueType)
 {
-    switch(keyType)
-    {
-    case KEYTYPE_INT:
-        switch(valueType)
-        {
-        case VALUETYPE_INT:
-            return Set(key.m_Int, value.m_Int);
-        //case VALUETYPE_DOUBLE:
-        //    return Set(key.m_Int, value.m_Double);
-        case VALUETYPE_BLOB:
-            return Set(key.m_Int, value.m_Blob);
-        default:
-            return false;
-        }
-    /*case KEYTYPE_DOUBLE:
-        switch(valueType)
-        {
-        case VALUETYPE_INT:
-            return Set(key.m_Double, value.m_Int);
-        case VALUETYPE_DOUBLE:
-            return Set(key.m_Double, value.m_Double);
-        case VALUETYPE_BLOB:
-            return Set(key.m_Double, value.m_Blob);
-        default:
-            return false;
-        }*/
-    case KEYTYPE_BLOB:
-        switch(valueType)
-        {
-        case VALUETYPE_INT:
-            return Set(key.m_Blob, value.m_Int);
-        //case VALUETYPE_DOUBLE:
-            //return Set(key.m_Blob, value.m_Double);
-        case VALUETYPE_BLOB:
-            return Set(key.m_Blob, value.m_Blob);
-        default:
-            return false;
-        }
-    }
-
-    return false;
-}
-
-bool
-HashTable::Set(const Blob* key, const Blob* value)
-{
-    HtItem* item = HtItem::Create(key, value);
-    if(item)
-    {
-        Set(item);
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Set(const Blob* key, const s64 value)
-{
-    HtItem* item = HtItem::Create(key, value);
-    if(item)
-    {
-        Set(item);
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Set(const s64 key, const Blob* value)
-{
-    HtItem* item = HtItem::Create(key, value);
-    if(item)
-    {
-        Set(item);
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Set(const s64 key, const s64 value)
-{
-    HtItem* item = HtItem::Create(key, value);
+    HtItem* item = HtItem::Create(key, keyType, value, valueType);
     if(item)
     {
         Set(item);
@@ -497,52 +349,13 @@ HashTable::Set(const s64 key, const s64 value)
 bool
 HashTable::Clear(const Key key, const KeyType keyType)
 {
-    switch(keyType)
-    {
-    case KEYTYPE_INT:
-        return Clear(key.m_Int);
-    //case KEYTYPE_DOUBLE:
-    //    return Clear(key.m_Double);
-    case KEYTYPE_BLOB:
-        return Clear(key.m_Blob);
-    }
-
-    return false;
-}
-
-bool
-HashTable::Clear(const s64 key)
-{
     Slot* slot;
     u32 hash;
-    HtItem** item = Find(key, &slot, &hash);
+    HtItem** item = Find(key, keyType, &slot, &hash);
     if(*item)
     {
         HtItem* next = (*item)->m_Next;
-        //HtItem::Destroy(*item);
-        *item = next;
-
-        --slot->m_Count;
-        hbassert(slot->m_Count >= 0);
-        --m_Count;
-        hbassert(m_Count >= 0);
-
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Clear(const Blob* key)
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** item = Find(key, &slot, &hash);
-    if(*item)
-    {
-        HtItem* next = (*item)->m_Next;
-        //HtItem::Destroy(*item);
+        HtItem::Destroy(*item);
         *item = next;
 
         --slot->m_Count;
@@ -562,23 +375,7 @@ HashTable::Find(const Key key, const KeyType keyType,
 {
     Slot* slot;
     u32 hash;
-    HtItem** item;
-    
-    switch(keyType)
-    {
-    case KEYTYPE_INT:
-        item = const_cast<HashTable*>(this)->Find(key.m_Int, &slot, &hash);
-        break;
-    /*case KEYTYPE_DOUBLE:
-        item = const_cast<HashTable*>(this)->Find(key.m_Double, &slot, &hash);
-        break;*/
-    case KEYTYPE_BLOB:
-        item = const_cast<HashTable*>(this)->Find(key.m_Blob, &slot, &hash);
-        break;
-    default:
-        item = NULL;
-        break;
-    }
+    HtItem** item = const_cast<HashTable*>(this)->Find(key, keyType, &slot, &hash);
 
     if(*item)
     {
@@ -591,133 +388,70 @@ HashTable::Find(const Key key, const KeyType keyType,
 }
 
 bool
-HashTable::Find(const Blob* key, const Blob** value) const
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
-    if(*item && (*item)->m_ValType == VALUETYPE_BLOB)
-    {
-        *value = (*item)->m_Value.m_Blob;
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Find(const Blob* key, s64* value) const
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
-    if(*item && (*item)->m_ValType == VALUETYPE_INT)
-    {
-        *value = (*item)->m_Value.m_Int;
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Find(const s64 key, const Blob** value) const
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
-    if(*item && (*item)->m_ValType == VALUETYPE_BLOB)
-    {
-        *value = (*item)->m_Value.m_Blob;
-        return true;
-    }
-
-    return false;
-}
-
-bool
-HashTable::Find(const s64 key, s64* value) const
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** item = const_cast<HashTable*>(this)->Find(key, &slot, &hash);
-    if(*item && (*item)->m_ValType == VALUETYPE_INT)
-    {
-        *value = (*item)->m_Value.m_Int;
-        return true;
-    }
-
-    return false;
-}
-
-bool
 HashTable::Patch(const Key key, const KeyType keyType,
-                const Blob* value, const size_t offset)
-{
-    switch(keyType)
-    {
-    case KEYTYPE_INT:
-        return Patch(key.m_Int, value, offset);
-    /*case KEYTYPE_DOUBLE:
-        return Patch(key.m_Double, value, offset);*/
-    case KEYTYPE_BLOB:
-        return Patch(key.m_Blob, value, offset);
-    }
-
-    return false;
-}
-
-bool
-HashTable::Patch(const Blob* key, const Blob* value, const size_t offset)
+                const size_t numPatches,
+                const Blob** patches,
+                const size_t* offsets)
 {
     Slot* slot;
     u32 hash;
-    HtItem** pOldItem = Find(key, &slot, &hash);
+    HtItem* pOldItem = *Find(key, keyType, &slot, &hash);
 
-    if(*pOldItem)
+    size_t patchNum = 0;
+
+again:
+
+    if(pOldItem)
     {
-        if(hbverify(VALUETYPE_BLOB == (*pOldItem)->m_ValType))
+        if(hbverify(VALUETYPE_BLOB == pOldItem->m_ValType))
         {
             byte* oldData;
             const byte* patchData;
-            const size_t oldLen = (*pOldItem)->m_Value.m_Blob->GetData(&oldData);
-            const size_t patchLen = value->GetData(&patchData);
-            if(offset + patchLen <= oldLen)
-            {
-                //New data will be patched within the bounds of
-                //the old data.
+            const size_t oldLen = pOldItem->m_Value.m_Blob->GetData(&oldData);
 
-                //Use memmove because value and oldItem could be
-                //the same item.
-                memmove(&oldData[offset], patchData, patchLen);
-            }
-            else
+            for(; patchNum < numPatches; ++patchNum)
             {
-                //New data extends past the end of the old data.
+                const Blob* patch = patches[patchNum];
+                const size_t offset = offsets[patchNum];
 
-                const size_t newLen = offset + patchLen;
-                Blob* newStr = Blob::Create(newLen);
-                if(newStr)
+                const size_t patchLen = patch->GetData(&patchData);
+                if(offset + patchLen <= oldLen)
                 {
-                    byte* newData;
-                    newStr->GetData(&newData);
-                    if(offset < oldLen)
-                    {
-                        memcpy(newData, oldData, offset);
-                    }
-                    else
-                    {
-                        memcpy(newData, oldData, oldLen);
-                    }
+                    //New data will be patched within the bounds of
+                    //the old data.
 
-                    memcpy(&newData[offset], patchData, patchLen);
-
-                    Blob::Destroy((*pOldItem)->m_Value.m_Blob);
-                    (*pOldItem)->m_Value.m_Blob = newStr;
+                    //Use memmove because value and oldItem could be
+                    //the same item.
+                    memmove(&oldData[offset], patchData, patchLen);
                 }
-            }
+                else
+                {
+                    //New data extends past the end of the old data.
 
-            return true;
+                    const size_t newLen = offset + patchLen;
+                    Blob* newStr = Blob::Create(newLen);
+                    if(newStr)
+                    {
+                        byte* newData;
+                        newStr->GetData(&newData);
+                        if(offset < oldLen)
+                        {
+                            memcpy(newData, oldData, offset);
+                        }
+                        else
+                        {
+                            memcpy(newData, oldData, oldLen);
+                        }
+
+                        memcpy(&newData[offset], patchData, patchLen);
+
+                        Blob::Destroy(pOldItem->m_Value.m_Blob);
+                        pOldItem->m_Value.m_Blob = newStr;
+                    }
+                }
+
+                return true;
+            }
         }
     }
     else
@@ -725,94 +459,23 @@ HashTable::Patch(const Blob* key, const Blob* value, const size_t offset)
         //Item doesn't exist yet, create it.
 
         const byte* patchData;
-        const size_t patchLen = value->GetData(&patchData);
-        const size_t newLen = offset + patchLen;
+        const size_t patchLen = patches[patchNum]->GetData(&patchData);
+        const size_t newLen = offsets[patchNum] + patchLen;
 
-        HtItem* newItem = HtItem::CreateEmpty(key, newLen);
-
-        if(newItem)
-        {
-            byte* newData;
-            newItem->m_Value.m_Blob->GetData(&newData);
-            memcpy(&newData[offset], patchData, patchLen);
-            Set(newItem);
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool
-HashTable::Patch(const s64 key, const Blob* value, const size_t offset)
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** pOldItem = Find(key, &slot, &hash);
-
-    if(*pOldItem)
-    {
-        if(hbverify(VALUETYPE_BLOB == (*pOldItem)->m_ValType))
-        {
-            byte* oldData;
-            const byte* patchData;
-            const size_t oldLen = (*pOldItem)->m_Value.m_Blob->GetData(&oldData);
-            const size_t patchLen = value->GetData(&patchData);
-            if(offset + patchLen <= oldLen)
-            {
-                //New data will be patched within the bounds of
-                //the old data.
-
-                //Use memmove because value and oldItem could be
-                //the same item.
-                memmove(&oldData[offset], patchData, patchLen);
-            }
-            else
-            {
-                //New data extends past the end of the old data.
-
-                const size_t newLen = offset + patchLen;
-                Blob* newStr = Blob::Create(newLen);
-                if(newStr)
-                {
-                    byte* newData;
-                    newStr->GetData(&newData);
-                    if(offset < oldLen)
-                    {
-                        memcpy(newData, oldData, offset);
-                    }
-                    else
-                    {
-                        memcpy(newData, oldData, oldLen);
-                    }
-
-                    memcpy(&newData[offset], patchData, patchLen);
-
-                    Blob::Destroy((*pOldItem)->m_Value.m_Blob);
-                    (*pOldItem)->m_Value.m_Blob = newStr;
-                }
-            }
-
-            return true;
-        }
-    }
-    else
-    {
-        //Item doesn't exist yet, create it.
-
-        const byte* patchData;
-        const size_t patchLen = value->GetData(&patchData);
-        const size_t newLen = offset + patchLen;
-
-        HtItem* newItem = HtItem::CreateEmpty(key, newLen);
+        HtItem* newItem = pOldItem = HtItem::CreateEmpty(key, keyType, newLen);
 
         if(newItem)
         {
             byte* newData;
             newItem->m_Value.m_Blob->GetData(&newData);
-            memcpy(&newData[offset], patchData, patchLen);
+            memcpy(&newData[offsets[patchNum]], patchData, patchLen);
             Set(newItem);
-            return true;
+            patchNum = 1;
+            goto again;
+        }
+        else
+        {
+            return false;
         }
     }
 
@@ -882,21 +545,7 @@ HashTable::Set(HtItem* newItem, bool* replaced)
 {
     Slot* slot;
     u32 hash;
-    HtItem** pitem;
-
-    switch(newItem->m_KeyType)
-    {
-    case KEYTYPE_BLOB:
-        pitem = Find(newItem->m_Key.m_Blob, &slot, &hash);
-        break;
-    case KEYTYPE_INT:
-        pitem = Find(newItem->m_Key.m_Int, &slot, &hash);
-        break;
-    default:
-        pitem = NULL;
-        slot = NULL;
-        break;
-    }
+    HtItem** pitem = Find(newItem->m_Key, newItem->m_KeyType, &slot, &hash);
 
     hbassert(pitem);
 
@@ -916,12 +565,26 @@ HashTable::Set(HtItem* newItem, bool* replaced)
 }
 
 HtItem**
-HashTable::Find(const Blob* key, Slot** slot, u32* hash)
+HashTable::Find(const Key key, const KeyType keyType, Slot** slot, u32* hash)
 {
+    switch(keyType)
+    {
+    case KEYTYPE_INT:
+        *hash = HashBytes((const byte*)&key.m_Int, sizeof(key.m_Int));
+        break;
+    case KEYTYPE_DOUBLE:
+        *hash = HashBytes((const byte*)&key.m_Double, sizeof(key.m_Double));
+        break;
+    case KEYTYPE_BLOB:
+        {
+            const byte* keyData;
+            const size_t keylen = key.m_Blob->GetData(&keyData);
+            *hash = HashBytes(keyData, keylen);
+        }
+        break;
+    }
+
     HtItem** item = NULL;
-    const byte* keyData;
-    const size_t keylen = key->GetData(&keyData);
-    *hash = HashBytes(keyData, keylen);
     for(int i = 0; i < 2 && m_Slots[i]; ++i)
     {
         const unsigned idx = *hash & (m_NumSlots-1);
@@ -931,32 +594,8 @@ HashTable::Find(const Blob* key, Slot** slot, u32* hash)
         for(; *item; item = &(*item)->m_Next)
         {
             if(*hash == (*item)->m_Hash
-                && KEYTYPE_BLOB == (*item)->m_KeyType
-                 && (*item)->m_Key.m_Blob->EQ(key))
-            {
-                return item;
-            }
-        }
-    }
-
-    return item;
-}
-
-HtItem**
-HashTable::Find(const s64 key, Slot** slot, u32* hash)
-{
-    HtItem** item = NULL;
-    *hash = HashBytes((const byte*)&key, sizeof(key));
-    for(int i = 0; i < 2 && m_Slots[i]; ++i)
-    {
-        const unsigned idx = *hash & (m_NumSlots-1);
-        *slot = &m_Slots[i][idx];
-        item = &(*slot)->m_Item;
-
-        for(; *item; item = &(*item)->m_Next)
-        {
-            if(KEYTYPE_INT == (*item)->m_KeyType
-                && (*item)->m_Key.m_Int == key)
+                && keyType == (*item)->m_KeyType
+                 && (*item)->m_Key.EQ(keyType, key))
             {
                 return item;
             }

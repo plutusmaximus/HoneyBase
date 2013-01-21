@@ -110,13 +110,22 @@ public:
     size_t GetData(const byte** data) const;
     size_t GetData(byte** data);
 
+    size_t CopyData(byte* dst, const size_t dstSize) const;
+
     size_t Length() const;
 
     size_t Size() const;
 
     Blob* Dup() const;
 
-    int Compare(const Blob* that) const;
+    int Compare(const byte* thatData, const size_t thatLen) const;
+
+    int Compare(const Blob* that) const
+    {
+        const byte* thatData;
+        const size_t thatLen = that->GetData(&thatData);
+        return Compare(thatData, thatLen);
+    }
 
     bool EQ(const Blob* that) const
     {

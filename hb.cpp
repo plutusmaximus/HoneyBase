@@ -254,6 +254,16 @@ Blob::GetData(byte** data)
 }
 
 size_t
+Blob::CopyData(byte* dst, const size_t dstSize) const
+{
+    const byte* data;
+    const size_t len = GetData(&data);
+    size_t cpyLen = (len > dstSize ? dstSize : len);
+    memcpy(dst, data, cpyLen);
+    return len;
+}
+
+size_t
 Blob::Length() const
 {
     size_t len = 0;
@@ -296,10 +306,8 @@ Blob::Dup() const
 }
 
 int
-Blob::Compare(const Blob* that) const
+Blob::Compare(const byte* thatData, const size_t thatLen) const
 {
-    const byte* thatData;
-    const size_t thatLen = that->GetData(&thatData);
     const byte* myData;
     const size_t myLen = GetData(&myData);
 

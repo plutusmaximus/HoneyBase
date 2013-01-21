@@ -11,14 +11,9 @@ class HtItem
     friend class HashTable;
 private:
 
-    static HtItem* Create(const Blob* key, const Blob* value);
-    static HtItem* Create(const Blob* key, const s64 value);
-    static HtItem* Create(const Blob* key, const double value);
-    static HtItem* Create(const s64 key, const Blob* value);
-    static HtItem* Create(const s64 key, const s64 value);
-    static HtItem* Create(const s64 key, const double value);
-    static HtItem* CreateEmpty(const Blob* key, const size_t len);
-    static HtItem* CreateEmpty(const s64 key, const size_t len);
+    static HtItem* Create(const Key key, const KeyType keyType,
+                            const Value value, const ValueType valueType);
+    static HtItem* CreateEmpty(const Key key, const KeyType keyType, const size_t len);
     static void Destroy(HtItem* item);
 
     Key m_Key;
@@ -48,26 +43,16 @@ public:
 
     bool Set(const Key key, const KeyType keyType,
             const Value value, const ValueType valueType);
-    bool Set(const Blob* key, const Blob* value);
-    bool Set(const Blob* key, const s64 value);
-    bool Set(const s64 key, const Blob* value);
-    bool Set(const s64 key, const s64 value);
 
     bool Clear(const Key key, const KeyType keyType);
-	bool Clear(const s64 key);
-	bool Clear(const Blob* key);
 
     bool Find(const Key key, const KeyType keyType,
                 Value* value, ValueType* valueType);
-    bool Find(const Blob* key, const Blob** value) const;
-    bool Find(const Blob* key, s64* value) const;
-    bool Find(const s64 key, const Blob** value) const;
-    bool Find(const s64 key, s64* value) const;
 
     bool Patch(const Key key, const KeyType keyType,
-                const Blob* value, const size_t offset);
-    bool Patch(const Blob* key, const Blob* value, const size_t offset);
-    bool Patch(const s64 key, const Blob* value, const size_t offset);
+                const size_t numPatches,
+                const Blob** patches,
+                const size_t* offsets);
 
     size_t Count() const;
 
@@ -91,8 +76,7 @@ private:
     void Set(HtItem* item);
     void Set(HtItem* item, bool* replaced);
     
-    HtItem** Find(const Blob* key, Slot** slot, u32* hash);
-    HtItem** Find(const s64 key, Slot** slot, u32* hash);
+    HtItem** Find(const Key key, const KeyType keyType, Slot** slot, u32* hash);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 

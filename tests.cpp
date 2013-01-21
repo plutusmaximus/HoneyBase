@@ -2,6 +2,7 @@
 
 #include "btree.h"
 #include "dict.h"
+#include "skiplist.h"
 
 #include <algorithm>
 #include <functional>
@@ -58,12 +59,13 @@ static void CreateRandomString(char* buf, const size_t bufSize)
 //  KV
 ///////////////////////////////////////////////////////////////////////////////
 void
-KV::CreateRandomKeys(const KeyType keyType,
-                    const size_t keySize,
-                    const ValueType valueType,
-                    const size_t valueSize,
-                    KV* kv,
-                    const int numKeys)
+KV::CreateKeys(const KeyType keyType,
+                const size_t keySize,
+                const ValueType valueType,
+                const size_t valueSize,
+                const TestKeyOrder keyOrder,
+                KV* kv,
+                const int numKeys)
 {
     if(KEYTYPE_INT == keyType)
     {
@@ -83,7 +85,8 @@ KV::CreateRandomKeys(const KeyType keyType,
     }
     else if(KEYTYPE_BLOB == keyType)
     {
-        const int numWords = ((((keySize*6)+7)/8)+3)/4;
+        const int numBytes = ((keySize*6)+7)/8;
+        const int numWords = (numBytes+3)/4;
         const size_t sizeofData = numWords * sizeof(u32);
         u32* data = (u32*)malloc(sizeofData);
         char* keyBuf = (char*)malloc(keySize+1);
@@ -95,11 +98,6 @@ KV::CreateRandomKeys(const KeyType keyType,
             }
             Base64Encode((byte*)data, sizeofData, keyBuf, keySize+1);
             kv[i].m_Key.m_Blob = Blob::Create((byte*)keyBuf, strlen(keyBuf));
-
-            for(int j = 0; j < i; ++j)
-            {
-                hbassert(!kv[j].m_Key.m_Blob->EQ(kv[i].m_Key.m_Blob));
-            }
         }
 
         free(data);
@@ -124,22 +122,28 @@ KV::CreateRandomKeys(const KeyType keyType,
     }
     else if(VALUETYPE_BLOB == valueType)
     {
-        const int numWords = ((((valueSize*6)+7)/8)+3)/4;
+        const int numBytes = ((valueSize*6)+7)/8;
+        const int numWords = (numBytes+3)/4;
         const size_t sizeofData = numWords * sizeof(u32);
         u32* data = (u32*)malloc(sizeofData);
-        char* valueBuf = (char*)malloc(valueSize+1);
+        char* valBuf = (char*)malloc(valueSize+1);
         for(int i = 0; i < numKeys; ++i)
         {
             for(int j = 0; j < numWords; ++j)
             {
                 data[j] = i+j;
             }
-            Base64Encode((byte*)data, sizeofData, valueBuf, keySize+1);
-            kv[i].m_Value.m_Blob = Blob::Create((byte*)valueBuf, strlen(valueBuf));
+            Base64Encode((byte*)data, sizeofData, valBuf, valueSize+1);
+            kv[i].m_Value.m_Blob = Blob::Create((byte*)valBuf, strlen(valBuf));
         }
 
         free(data);
-        free(valueBuf);
+        free(valBuf);
+    }
+
+    if(KEYORDER_RANDOM == keyOrder)
+    {
+        std::random_shuffle(&kv[0], &kv[numKeys]);
     }
 }
 
@@ -173,7 +177,7 @@ HashTableTest::Test(const int numKeys)
     ValueType valueType;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, KEYORDER_RANDOM, kv, numKeys);
 
     for(int i = 0; i < numKeys; ++i)
     {
@@ -247,7 +251,7 @@ HashTableTest::TestMergeIntKeys(const int numKeys, const int numIterations)
                 Blob::Encode((byte*)&alphabet[abOffset], len,
                             hbsBuf, sizeof(hbsBuf));
 
-            hbverify(dict->Patch(p->m_Key, KEYTYPE_INT, value, offset));
+            hbverify(dict->Patch(p->m_Key, KEYTYPE_INT, 1, &value, &offset));
 
             memcpy(&p->m_Test[offset], &alphabet[abOffset], len);
         }
@@ -282,7 +286,7 @@ HashTableTest::TestMergeIntKeys(const int numKeys, const int numIterations)
 }
 
 void
-HashTableTest::AddRandomKeys(const int numKeys)
+HashTableTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder)
 {
     HashTable* dict = HashTable::Create();
     Value value;
@@ -291,7 +295,7 @@ HashTableTest::AddRandomKeys(const int numKeys)
     StopWatch sw;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -318,15 +322,19 @@ HashTableTest::AddRandomKeys(const int numKeys)
     sw.Stop();
     s_Log.Debug("find: %f", sw.GetElapsed());
     
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
+    if(KEYORDER_RANDOM == keyOrder)
     {
-    hbassert(dict->Find(kv[i].m_Key, &value));
-    hbassert(value == kv[i].m_Value);
+        std::sort(&kv[0], &kv[numKeys]);
+
+        sw.Restart();
+        for(int i = 0; i < numKeys; ++i)
+        {
+            hbverify(dict->Find(kv[i].m_Key, m_KeyType, &value, &valueType));
+            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+        }
+        sw.Stop();
+        s_Log.Debug("sorted find: %f", sw.GetElapsed());
     }
-    sw.Stop();*/
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -342,14 +350,14 @@ HashTableTest::AddRandomKeys(const int numKeys)
 }
 
 void
-HashTableTest::AddDeleteRandomKeys(const int numKeys)
+HashTableTest::AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder)
 {
     HashTable* dict = HashTable::Create();
     Value value;
     ValueType valueType;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     for(int i = 0; i < numKeys; ++i)
     {
@@ -402,7 +410,7 @@ HashTableSpeedTest::HashTableSpeedTest(const KeyType keyType, const ValueType va
 }
 
 void
-HashTableSpeedTest::AddRandomKeys(const int numKeys)
+HashTableSpeedTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder)
 {
     HashTable* dict = HashTable::Create();
     Value value;
@@ -411,7 +419,7 @@ HashTableSpeedTest::AddRandomKeys(const int numKeys)
     StopWatch sw;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -456,7 +464,7 @@ BTreeTest::BTreeTest(const KeyType keyType, const ValueType valueType)
 }
 
 void
-BTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
+BTreeTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
 {
     BTree* btree = BTree::Create(m_KeyType);
     Value value;
@@ -465,21 +473,20 @@ BTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
     StopWatch sw;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
     {
         HB_ASSERTONLY(const bool added =) btree->Insert(kv[i].m_Key, kv[i].m_Value, m_ValueType);
-#if HB_ASSERT
         hbassert(added);
-        hbassert(btree->Find(kv[i].m_Key, &value, &valueType));
+        HB_ASSERTONLY(const bool found =) btree->Find(kv[i].m_Key, &value, &valueType);
+        hbassert(found);
         if(unique)
         {
             hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
         }
         //btree->Validate();
-#endif
     }
     sw.Stop();
     s_Log.Debug("insert: %f", sw.GetElapsed());
@@ -492,29 +499,33 @@ BTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
     for(int i = 0; i < numKeys; ++i)
     {
         HB_ASSERTONLY(const bool found =) btree->Find(kv[i].m_Key, &value, &valueType);
-#if HB_ASSERT
         hbassert(found);
         if(unique)
         {
             hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
         }
-#endif
     }
     sw.Stop();
     s_Log.Debug("find: %f", sw.GetElapsed());
 
-    s_Log.Debug("utilization: %f", btree->GetUtilization());
-
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
+    if(KEYORDER_RANDOM == keyOrder)
     {
-        hbassert(btree->Find(kv[i].m_Key, &value));
-        if(unique)
+        std::sort(&kv[0], &kv[numKeys]);
+
+        sw.Restart();
+        for(int i = 0; i < numKeys; ++i)
         {
-            hbassert(value == kv[i].m_Value);
+            hbverify(btree->Find(kv[i].m_Key, &value, &valueType));
+            if(unique)
+            {
+                hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+            }
         }
-    }*/
+        sw.Stop();
+        s_Log.Debug("sorted find: %f", sw.GetElapsed());
+    }
+
+    s_Log.Debug("utilization: %f", btree->GetUtilization());
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -534,14 +545,14 @@ BTreeTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
 }
 
 void
-BTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
+BTreeTest::AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
 {
     BTree* btree = BTree::Create(m_KeyType);
     Value value;
     ValueType valueType;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     for(int i = 0; i < numKeys; ++i)
     {
@@ -591,93 +602,6 @@ BTreeTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int r
     btree->Validate();
 
     //btree.Dump(true);
-
-    BTree::Destroy(btree);
-
-    delete [] kv;
-}
-
-void
-BTreeTest::AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending)
-{
-    BTree* btree = BTree::Create(m_KeyType);
-    Value value;
-    ValueType valueType;
-
-    StopWatch sw;
-
-    KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
-
-    if(ascending)
-    {
-        std::sort(&kv[0], &kv[numKeys]);
-    }
-    else
-    {
-        std::sort(&kv[0], &kv[numKeys], std::greater<KV>());
-    }
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        HB_ASSERTONLY(const bool added =) btree->Insert(kv[i].m_Key, kv[i].m_Value, m_ValueType);
-#if HB_ASSERT
-        hbassert(added);
-        hbassert(btree->Find(kv[i].m_Key, &value, &valueType));
-        if(unique)
-        {
-            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
-        }
-        //btree->Validate();
-#endif
-    }
-    sw.Stop();
-    s_Log.Debug("insert: %f", sw.GetElapsed());
-
-    btree->Validate();
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        HB_ASSERTONLY(const bool found =) btree->Find(kv[i].m_Key, &value, &valueType);
-#if HB_ASSERT
-        hbassert(found);
-        if(unique)
-        {
-            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
-        }
-#endif
-    }
-    sw.Stop();
-    s_Log.Debug("find: %f", sw.GetElapsed());
-
-    s_Log.Debug("utilization: %f", btree->GetUtilization());
-
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbassert(btree.Find(kv[i].m_Key, &value));
-        if(unique)
-        {
-            hbassert(value == kv[i].m_Value);
-        }
-    }*/
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        HB_ASSERTONLY(const bool deleted =) btree->Delete(kv[i].m_Key);
-        hbassert(deleted);
-        //btree->Validate();
-    }
-    sw.Stop();
-    s_Log.Debug("delete: %f", sw.GetElapsed());
-
-    btree->Validate();
 
     BTree::Destroy(btree);
 
@@ -749,7 +673,7 @@ BTreeSpeedTest::BTreeSpeedTest(const KeyType keyType, const ValueType valueType)
 }
 
 void
-BTreeSpeedTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
+BTreeSpeedTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
 {
     BTree* btree = BTree::Create(m_KeyType);
     Value value;
@@ -758,7 +682,7 @@ BTreeSpeedTest::AddRandomKeys(const int numKeys, const bool unique, const int ra
     StopWatch sw;
 
     KV* kv = new KV[numKeys];
-    KV::CreateRandomKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, kv, numKeys);
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -796,4 +720,206 @@ BTreeSpeedTest::AddRandomKeys(const int numKeys, const bool unique, const int ra
     delete [] kv;
 }
 
-}   //namespace honeybas
+///////////////////////////////////////////////////////////////////////////////
+//  SkipListTest
+///////////////////////////////////////////////////////////////////////////////
+SkipListTest::SkipListTest(const KeyType keyType, const ValueType valueType)
+: m_KeyType(keyType)
+, m_ValueType(valueType)
+{
+}
+
+void
+SkipListTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
+{
+    SkipList* skiplist = SkipList::Create(m_KeyType);
+    Value value;
+    ValueType valueType;
+
+    StopWatch sw;
+
+    KV* kv = new KV[numKeys];
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Insert(kv[i].m_Key, kv[i].m_Value, m_ValueType);
+        hbverify(skiplist->Find(kv[i].m_Key, &value, &valueType));
+        if(unique)
+        {
+            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+        }
+    }
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbverify(skiplist->Find(kv[i].m_Key, &value, &valueType));
+        if(unique)
+        {
+            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+        }
+    }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    if(KEYORDER_RANDOM == keyOrder)
+    {
+        std::sort(&kv[0], &kv[numKeys]);
+
+        sw.Restart();
+        for(int i = 0; i < numKeys; ++i)
+        {
+            hbverify(skiplist->Find(kv[i].m_Key, &value, &valueType));
+            if(unique)
+            {
+                hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+            }
+        }
+        sw.Stop();
+        s_Log.Debug("sorted find: %f", sw.GetElapsed());
+    }
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbverify(skiplist->Delete(kv[i].m_Key));
+    }
+    sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    Heap::Free(skiplist);
+    delete [] kv;
+}
+
+void
+SkipListTest::AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
+{
+    SkipList* skiplist = SkipList::Create(m_KeyType);
+    Value value;
+    ValueType valueType;
+
+    StopWatch sw;
+
+    KV* kv = new KV[numKeys];
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Insert2(kv[i].m_Key, kv[i].m_Value, m_ValueType);
+        hbverify(skiplist->Find2(kv[i].m_Key, &value, &valueType));
+        if(unique)
+        {
+            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+        }
+    }
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbverify(skiplist->Find2(kv[i].m_Key, &value, &valueType));
+        if(unique)
+        {
+            hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+        }
+    }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    s_Log.Debug("utilization: %f", skiplist->GetUtilization());
+
+    if(KEYORDER_RANDOM == keyOrder)
+    {
+        std::sort(&kv[0], &kv[numKeys]);
+
+        sw.Restart();
+        for(int i = 0; i < numKeys; ++i)
+        {
+            hbverify(skiplist->Find2(kv[i].m_Key, &value, &valueType));
+            if(unique)
+            {
+                hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+            }
+        }
+        sw.Stop();
+        s_Log.Debug("sorted find: %f", sw.GetElapsed());
+    }
+
+    /*sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        hbverify(skiplist->Delete2(kv[i].m_Key));
+    }
+    sw.Stop();*/
+
+    Heap::Free(skiplist);
+    delete [] kv;
+}
+
+void
+SkipListTest::AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
+{
+    SkipList* skiplist = SkipList::Create(m_KeyType);
+    Value value;
+    ValueType valueType;
+
+    KV* kv = new KV[numKeys];
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        int idx = Rand() % numKeys;
+        if(!kv[idx].m_Added)
+        {
+            skiplist->Insert(kv[idx].m_Key, kv[idx].m_Value, m_ValueType);
+            kv[idx].m_Added = true;
+            hbverify(skiplist->Find(kv[idx].m_Key, &value, &valueType));
+            if(unique)
+            {
+                hbverify(EQ(value, valueType, kv[idx].m_Value, m_ValueType));
+            }
+        }
+        else
+        {
+            hbverify(skiplist->Delete(kv[idx].m_Key));
+            kv[idx].m_Added = false;
+            hbverify(!skiplist->Find(kv[idx].m_Key, &value, &valueType));
+        }
+    }
+
+    for(int i = 0; i < numKeys; ++i)
+    {
+        if(kv[i].m_Added)
+        {
+            hbverify(skiplist->Find(kv[i].m_Key, &value, &valueType));
+            if(unique)
+            {
+                hbverify(EQ(value, valueType, kv[i].m_Value, m_ValueType));
+            }
+        }
+        else
+        {
+            hbverify(!skiplist->Find(kv[i].m_Key, &value, &valueType));
+        }
+    }
+
+    Heap::Free(skiplist);
+    delete [] kv;
+}
+
+}   //namespace honeybase

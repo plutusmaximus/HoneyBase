@@ -8,6 +8,14 @@ namespace honeybase
 {
 
 void
+Error::SetSucceeded()
+{
+    m_Message[0] = '\0';
+    m_Code = ERROR_NONE;
+    m_Succeeded = true;
+}
+
+void
 Error::SetSucceeded(const char* fmt, ...)
 {
     va_list args; 
@@ -29,6 +37,24 @@ Error::SetFailed(const ErrorCode code, const char* fmt, ...)
 
     m_Code = code;
     m_Succeeded = false;
+}
+
+bool
+Error::Succeeded() const
+{
+    return m_Succeeded;
+}
+
+ErrorCode
+Error::GetCode() const
+{
+    return m_Code;
+}
+
+const char*
+Error::GetText() const
+{
+    return m_Message;
 }
 
 }   //namespace honeybase

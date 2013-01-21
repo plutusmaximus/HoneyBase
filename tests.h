@@ -3,15 +3,22 @@
 namespace honeybase
 {
 
+enum TestKeyOrder
+{
+    KEYORDER_RANDOM,
+    KEYORDER_SEQUENTIAL
+};
+
 class KV
 {
 public:
-    static void CreateRandomKeys(const KeyType keyType,
-                                const size_t keySize,
-                                const ValueType valueType,
-                                const size_t valueSize,
-                                KV* kv,
-                                const int numKeys);
+    static void CreateKeys(const KeyType keyType,
+                            const size_t keySize,
+                            const ValueType valueType,
+                            const size_t valueSize,
+                            const TestKeyOrder keyOrder,
+                            KV* kv,
+                            const int numKeys);
 
     Key m_Key;
     Value m_Value;
@@ -70,9 +77,9 @@ public:
 
     void TestMergeIntKeys(const int numKeys, const int numIterations);
 
-    void AddRandomKeys(const int numKeys);
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder);
 
-    void AddDeleteRandomKeys(const int numKeys);
+    void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder);
 
 private:
 
@@ -86,7 +93,7 @@ public:
 
     HashTableSpeedTest(const KeyType keyType, const ValueType valueType);
 
-    void AddRandomKeys(const int numKeys);
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder);
 
     //void AddDeleteRandomKeys(const int numKeys);
 
@@ -102,9 +109,8 @@ public:
 
     BTreeTest(const KeyType keyType, const ValueType valueType);
 
-    void AddRandomKeys(const int numKeys, const bool unique, const int range);
-    void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
-    void AddSortedKeys(const int numKeys, const bool unique, const int range, const bool ascending);
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+    void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
     void AddDups(const int numKeys, const int min, const int max);
 
 private:
@@ -119,7 +125,24 @@ public:
 
     BTreeSpeedTest(const KeyType keyType, const ValueType valueType);
 
-    void AddRandomKeys(const int numKeys, const bool unique, const int range);
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+private:
+
+    const KeyType m_KeyType;
+    const ValueType m_ValueType;
+};
+
+class SkipListTest
+{
+public:
+
+    SkipListTest(const KeyType keyType, const ValueType valueType);
+
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+    void AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+    void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
 private:
 

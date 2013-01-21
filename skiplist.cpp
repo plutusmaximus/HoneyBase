@@ -55,28 +55,21 @@ SkipNode::Create()
 }
 
 SkipNode*
-SkipNode::Create(const s64 key, const Blob* value)
+SkipNode::Create(const Key key, const Value value, const ValueType valueType)
 {
     SkipNode* node = Create();
     if(node)
     {
         node->m_Key = key;
-        node->m_Value.m_Blob = value->Dup();
-        node->m_ValType = VALUETYPE_BLOB;
-    }
-
-    return node;
-}
-
-SkipNode*
-SkipNode::Create(const s64 key, const s64 value)
-{
-    SkipNode* node = Create();
-    if(node)
-    {
-        node->m_Key = key;
-        node->m_Value.m_Int = value;
-        node->m_ValType = VALUETYPE_INT;
+        if(VALUETYPE_BLOB == valueType)
+        {
+            node->m_Value.m_Blob = value.m_Blob->Dup();
+        }
+        else
+        {
+            node->m_Value = value;
+        }
+        node->m_ValType = valueType;
     }
 
     return node;
@@ -103,22 +96,49 @@ SkipNode::Destroy(SkipNode* node)
 ///////////////////////////////////////////////////////////////////////////////
 //  SkipList
 ///////////////////////////////////////////////////////////////////////////////
-bool
-SkipList::Insert(const s64 key, const Blob* value)
+SkipList::SkipList(const KeyType keyType)
+: m_KeyType(keyType)
+, m_Height(0)
+, m_Count(0)
+, m_Capacity(0)
 {
-    SkipNode* node = SkipNode::Create(key, value);
-    return node && Insert(node);
+    memset(m_Head, 0, sizeof(m_Head));
+}
+
+SkipList*
+SkipList::Create(const KeyType keyType)
+{
+    SkipList* skiplist = (SkipList*) Heap::ZAlloc(sizeof(SkipList));
+    if(skiplist)
+    {
+        new (skiplist) SkipList(keyType);
+    }
+
+    return skiplist;
+}
+
+void
+SkipList::Destroy(SkipList* skiplist)
+{
+    if(skiplist)
+    {
+        while(skiplist->m_Head[0])
+        {
+            skiplist->Delete(skiplist->m_Head[0]->m_Key);
+        }
+        Heap::Free(skiplist);
+    }
 }
 
 bool
-SkipList::Insert(const s64 key, const s64 value)
+SkipList::Insert(const Key key, const Value value, const ValueType valueType)
 {
-    SkipNode* node = SkipNode::Create(key, value);
+    SkipNode* node = SkipNode::Create(key, value, valueType);
     return node && Insert(node);
 }
 
 int
-SkipList::LowerBound(const s64 key, const SkipItem* first, const SkipItem* end)
+SkipList::LowerBound(const Key key, const SkipItem* first, const SkipItem* end) const
 {
     if(end > first)
     {
@@ -129,7 +149,7 @@ SkipList::LowerBound(const s64 key, const SkipItem* first, const SkipItem* end)
             const SkipItem* item = cur;
             size_t step = count >> 1;
             item += step;
-            if(item->m_Key < key)
+            if(item->m_Key.LT(m_KeyType, key))
             {
                 cur = ++item;
                 count -= step + 1;
@@ -147,7 +167,7 @@ SkipList::LowerBound(const s64 key, const SkipItem* first, const SkipItem* end)
 }
 
 int
-SkipList::UpperBound(const s64 key, const SkipItem* first, const SkipItem* end)
+SkipList::UpperBound(const Key key, const SkipItem* first, const SkipItem* end) const
 {
     if(end > first)
     {
@@ -158,7 +178,7 @@ SkipList::UpperBound(const s64 key, const SkipItem* first, const SkipItem* end)
             const SkipItem* item = cur;
             const size_t step = count >> 1;
             item += step;
-            if(!(key < item->m_Key))
+            if(!(key.LT(m_KeyType, item->m_Key)))
             {
                 cur = ++item;
                 count -= step + 1;
@@ -176,7 +196,7 @@ SkipList::UpperBound(const s64 key, const SkipItem* first, const SkipItem* end)
 }
 
 bool
-SkipList::Insert2(const s64 key, const s64 value)
+SkipList::Insert2(const Key key, const Value value, const ValueType valueType)
 {
     if(!m_Height)
     {
@@ -186,8 +206,15 @@ SkipList::Insert2(const s64 key, const s64 value)
             m_Capacity += hbarraylen(node->m_Items);
             m_Height = node->m_Height;
             node->m_Items[0].m_Key = key;
-            node->m_Items[0].m_Value.m_Int = value;
-            node->m_Items[0].m_ValType = VALUETYPE_INT;
+            if(VALUETYPE_BLOB == valueType)
+            {
+                node->m_Items[0].m_Value.m_Blob = value.m_Blob->Dup();
+            }
+            else
+            {
+                node->m_Items[0].m_Value = value;
+            }
+            node->m_Items[0].m_ValType = valueType;
             ++node->m_NumItems;
             for(int i = m_Height-1; i >= 0; --i)
             {
@@ -208,7 +235,7 @@ SkipList::Insert2(const s64 key, const s64 value)
         {
             links[i] = links[i+1];
 
-            for(cur = links[i][i]; cur->m_Links[i] && cur->m_Items[cur->m_NumItems-1].m_Key < key;
+            for(cur = links[i][i]; cur->m_Links[i] && cur->m_Items[cur->m_NumItems-1].m_Key.LT(m_KeyType, key);
                 links[i] = cur->m_Links, cur = cur->m_Links[i])
             {
             }
@@ -216,7 +243,36 @@ SkipList::Insert2(const s64 key, const s64 value)
 
         int idx = UpperBound(key, &cur->m_Items[0], &cur->m_Items[cur->m_NumItems]);
 
-        if(cur->m_NumItems == hbarraylen(cur->m_Items))
+        if(idx == hbarraylen(cur->m_Items))
+        {
+            SkipNode* node = SkipNode::Create();
+            if(!hbverify(node))
+            {
+                return false;
+            }
+
+            m_Capacity += hbarraylen(node->m_Items);
+
+            for(int i = m_Height-1; i >= 0; --i)
+            {
+                links[i] = links[i][i]->m_Links;
+            }
+
+            for(; m_Height < node->m_Height; ++m_Height)
+            {
+                links[m_Height] = m_Head;
+            }
+
+            for(int i = node->m_Height-1; i >= 0; --i)
+            {
+                node->m_Links[i] = links[i][i];
+                links[i][i] = node;
+            }
+
+            cur = node;
+            idx = 0;
+        }
+        else if(cur->m_NumItems == hbarraylen(cur->m_Items))
         {
             SkipNode* node = SkipNode::Create();
             if(!hbverify(node))
@@ -235,10 +291,9 @@ SkipList::Insert2(const s64 key, const s64 value)
             node->m_NumItems = numToMove;
             cur->m_NumItems -= numToMove;
 
-            while(m_Height < node->m_Height)
+            for(; m_Height < node->m_Height; ++m_Height)
             {
                 links[m_Height] = m_Head;
-                ++m_Height;
             }
 
             for(int i = node->m_Height-1; i >= 0; --i)
@@ -262,8 +317,15 @@ SkipList::Insert2(const s64 key, const s64 value)
         }
 
         cur->m_Items[idx].m_Key = key;
-        cur->m_Items[idx].m_Value.m_Int = value;
-        cur->m_Items[idx].m_ValType = VALUETYPE_INT;
+        if(VALUETYPE_BLOB == valueType)
+        {
+            cur->m_Items[idx].m_Value.m_Blob = value.m_Blob->Dup();
+        }
+        else
+        {
+            cur->m_Items[idx].m_Value = value;
+        }
+        cur->m_Items[idx].m_ValType = valueType;
         ++cur->m_NumItems;
         ++m_Count;
         return true;
@@ -273,7 +335,7 @@ SkipList::Insert2(const s64 key, const s64 value)
 }
 
 bool
-SkipList::Delete(const s64 key)
+SkipList::Delete(const Key key)
 {
     SkipNode** prev = m_Head;
     SkipNode* node = NULL;
@@ -281,11 +343,11 @@ SkipList::Delete(const s64 key)
     for(int i = m_Height-1; i >= 0; --i)
     {
         SkipNode* cur;
-        for(cur = prev[i]; cur && cur->m_Key < key; prev = cur->m_Links, cur = prev[i])
+        for(cur = prev[i]; cur && cur->m_Key.LT(m_KeyType, key); prev = cur->m_Links, cur = prev[i])
         {
         }
 
-        if(cur && key == cur->m_Key)
+        if(cur && key.EQ(m_KeyType, cur->m_Key))
         {
             prev[i] = cur->m_Links[i];
 
@@ -325,13 +387,14 @@ SkipList::Delete(const s64 key)
 }
 
 bool
-SkipList::Find(const s64 key, s64* value) const
+SkipList::Find(const Key key, Value* value, ValueType* valueType) const
 {
     const SkipNode* node = Find(key);
 
-    if(node && VALUETYPE_INT == node->m_ValType)
+    if(node)
     {
-        *value = node->m_Value.m_Int;
+        *value = node->m_Value;
+        *valueType = node->m_ValType;
         return true;
     }
 
@@ -339,32 +402,18 @@ SkipList::Find(const s64 key, s64* value) const
 }
 
 bool
-SkipList::Find(const s64 key, const Blob** value) const
-{
-    const SkipNode* node = Find(key);
-
-    if(node && VALUETYPE_BLOB == node->m_ValType)
-    {
-        *value = node->m_Value.m_Blob;
-        return true;
-    }
-
-    return false;
-}
-
-bool
-SkipList::Find2(const s64 key, s64* value) const
+SkipList::Find2(const Key key, Value* value, ValueType* valueType) const
 {
     const SkipNode* const* prev = m_Head;
     const SkipNode* cur = NULL;
 
     for(int i = m_Height-1; i >= 0; --i)
     {
-        for(cur = prev[i]; cur && cur->m_Items[cur->m_NumItems-1].m_Key < key; prev = cur->m_Links, cur = prev[i])
+        for(cur = prev[i]; cur && cur->m_Items[cur->m_NumItems-1].m_Key.LT(m_KeyType, key); prev = cur->m_Links, cur = prev[i])
         {
         }
 
-        if(i > 0 && cur && cur->m_Items[0].m_Key <= key)
+        if(i > 0 && cur && cur->m_Items[0].m_Key.LE(m_KeyType, key))
         {
             //Early out if we found the block that might contain the key
             break;
@@ -376,7 +425,8 @@ SkipList::Find2(const s64 key, s64* value) const
         const int idx = LowerBound(key, &cur->m_Items[0], &cur->m_Items[cur->m_NumItems]);
         if(idx < cur->m_NumItems)
         {
-            *value = cur->m_Items[idx].m_Value.m_Int;
+            *value = cur->m_Items[idx].m_Value;
+            *valueType = cur->m_Items[idx].m_ValType;
             return true;
         }
     }
@@ -405,14 +455,14 @@ SkipList::Insert(SkipNode* node)
     int i;
     for(i = m_Height-1; i >= node->m_Height; --i)
     {
-        for(SkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
+        for(SkipNode* cur = prev[i]; cur && cur->m_Key.LT(m_KeyType, node->m_Key); prev = cur->m_Links, cur = prev[i])
         {
         }
     }
 
     for(; i >= 0; --i)
     {
-        for(SkipNode* cur = prev[i]; cur && cur->m_Key < node->m_Key; prev = cur->m_Links, cur = prev[i])
+        for(SkipNode* cur = prev[i]; cur && cur->m_Key.LT(m_KeyType, node->m_Key); prev = cur->m_Links, cur = prev[i])
         {
         }
 
@@ -425,232 +475,24 @@ SkipList::Insert(SkipNode* node)
 }
 
 const SkipNode*
-SkipList::Find(const s64 key) const
+SkipList::Find(const Key key) const
 {
     const SkipNode* const* prev = m_Head;
 
     for(int i = m_Height-1; i >= 0; --i)
     {
         const SkipNode* cur;
-        for(cur = prev[i]; cur && cur->m_Key < key; prev = cur->m_Links, cur = prev[i])
+        for(cur = prev[i]; cur && cur->m_Key.LT(m_KeyType, key); prev = cur->m_Links, cur = prev[i])
         {
         }
 
-        if(cur && key == cur->m_Key)
+        if(cur && key.EQ(m_KeyType, cur->m_Key))
         {
             return cur;
         }
     }
 
     return NULL;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//  SkipListTest
-///////////////////////////////////////////////////////////////////////////////
-static ptrdiff_t myrandom (ptrdiff_t i)
-{
-    return Rand()%i;
-}
-
-void
-SkipListTest::CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range)
-{
-    if(unique)
-    {
-        for(int i = 0; i < numKeys; ++i)
-        {
-            kv[i].m_Key = i;
-        }
-        std::random_shuffle(&kv[0], &kv[numKeys], myrandom);
-    }
-    else
-    {
-        for(int i = 0; i < numKeys; ++i)
-        {
-            kv[i].m_Key = Rand() % range;
-        }
-    }
-}
-
-void
-SkipListTest::AddRandomKeys(const int numKeys, const bool unique, const int range)
-{
-    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
-    s64 value;
-
-    StopWatch sw;
-
-    KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Value = i;
-        skiplist->Insert(kv[i].m_Key, kv[i].m_Value);
-        hbverify(skiplist->Find(kv[i].m_Key, &value));
-        if(unique)
-        {
-             hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Find(kv[i].m_Key, &value));
-        if(unique)
-        {
-            hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();
-
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Find(kv[i].m_Key, &value));
-        if(unique)
-        {
-            hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();*/
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Delete(kv[i].m_Key));
-    }
-    sw.Stop();
-
-    Heap::Free(skiplist);
-    delete [] kv;
-}
-
-void
-SkipListTest::AddRandomKeys2(const int numKeys, const bool unique, const int range)
-{
-    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
-    s64 value;
-
-    StopWatch sw;
-
-    KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Value = i;
-        skiplist->Insert2(kv[i].m_Key, kv[i].m_Value);
-        hbverify(skiplist->Find2(kv[i].m_Key, &value));
-        if(unique)
-        {
-             hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();
-    s_Log.Debug("insert: %f", sw.GetElapsed());
-
-    std::random_shuffle(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Find2(kv[i].m_Key, &value));
-        if(unique)
-        {
-            hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();
-    s_Log.Debug("find: %f", sw.GetElapsed());
-
-    s_Log.Debug("utilization: %f", skiplist->GetUtilization());
-
-    /*std::sort(&kv[0], &kv[numKeys]);
-
-    sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Find2(kv[i].m_Key, &value));
-        if(unique)
-        {
-            hbverify(value == kv[i].m_Value);
-        }
-    }
-    sw.Stop();*/
-
-    /*sw.Restart();
-    for(int i = 0; i < numKeys; ++i)
-    {
-        hbverify(skiplist->Delete2(kv[i].m_Key));
-    }
-    sw.Stop();*/
-
-    Heap::Free(skiplist);
-    delete [] kv;
-}
-
-void
-SkipListTest::AddDeleteRandomKeys(const int numKeys, const bool unique, const int range)
-{
-    SkipList* skiplist = (SkipList*)Heap::ZAlloc(sizeof(SkipList));
-    s64 value;
-
-    KV* kv = new KV[numKeys];
-    CreateRandomKeys(kv, numKeys, unique, range);
-    for(int i = 0; i < numKeys; ++i)
-    {
-        kv[i].m_Value = i;
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        int idx = Rand() % numKeys;
-        if(!kv[idx].m_Added)
-        {
-            skiplist->Insert(kv[idx].m_Key, kv[idx].m_Value);
-            kv[idx].m_Added = true;
-            hbverify(skiplist->Find(kv[idx].m_Key, &value));
-            if(unique)
-            {
-                hbverify(value == kv[idx].m_Value);
-            }
-        }
-        else
-        {
-            hbverify(skiplist->Delete(kv[idx].m_Key));
-            kv[idx].m_Added = false;
-            hbverify(!skiplist->Find(kv[idx].m_Key, &value));
-        }
-    }
-
-    for(int i = 0; i < numKeys; ++i)
-    {
-        if(kv[i].m_Added)
-        {
-            hbverify(skiplist->Find(kv[i].m_Key, &value));
-            if(unique)
-            {
-                hbverify(value == kv[i].m_Value);
-            }
-        }
-        else
-        {
-            hbverify(!skiplist->Find(kv[i].m_Key, &value));
-        }
-    }
-
-    Heap::Free(skiplist);
-    delete [] kv;
 }
 
 }   //namespace honeybase

@@ -13,7 +13,7 @@ class SkipItem
 {
     friend class SkipList;
 
-    s64 m_Key;
+    Key m_Key;
     Value m_Value;
     ValueType m_ValType;
 };
@@ -22,8 +22,7 @@ class SkipNode
 {
 public:
     static SkipNode* Create();
-    static SkipNode* Create(const s64 key, const Blob* value);
-    static SkipNode* Create(const s64 key, const s64 value);
+    static SkipNode* Create(const Key key, const Value value, const ValueType valueType);
     static void Destroy(SkipNode* node);
 
     static const int BLOCK_LEN  = 64;
@@ -31,7 +30,7 @@ public:
     SkipItem m_Items[BLOCK_LEN];
     int m_NumItems;
 
-    s64 m_Key;
+    Key m_Key;
     Value m_Value;
     int m_Height;
 
@@ -53,20 +52,22 @@ class SkipList
 public:
     static const int MAX_HEIGHT = 32;
 
-    bool Insert(const s64 key, const Blob* value);
-    bool Insert(const s64 key, const s64 value);
+    static SkipList* Create(const KeyType keyType);
+    static void Destroy(SkipList* skiplist);
 
-    bool Insert2(const s64 key, const s64 value);
+    bool Insert(const Key key, const Value value, const ValueType valueType);
 
-    bool Delete(const s64 key);
+    bool Insert2(const Key key, const Value value, const ValueType valueType);
 
-    bool Find(const s64 key, s64* value) const;
-    bool Find(const s64 key, const Blob** value) const;
+    bool Delete(const Key key);
 
-    bool Find2(const s64 key, s64* value) const;
+    bool Find(const Key key, Value* value, ValueType* valueType) const;
+
+    bool Find2(const Key key, Value* value, ValueType* valueType) const;
 
     double GetUtilization() const;
-
+    
+    const KeyType m_KeyType;
     int m_Height;
     unsigned m_Count;
     unsigned m_Capacity;
@@ -75,43 +76,15 @@ public:
 private:
     
     bool Insert(SkipNode* node);
-    const SkipNode* Find(const s64 key) const;
+    const SkipNode* Find(const Key key) const;
 
-    static int LowerBound(const s64 key, const SkipItem* first, const SkipItem* end);
-    static int UpperBound(const s64 key, const SkipItem* first, const SkipItem* end);
+    int LowerBound(const Key key, const SkipItem* first, const SkipItem* end) const;
+    int UpperBound(const Key key, const SkipItem* first, const SkipItem* end) const;
 
-    SkipList();
+    SkipList(const KeyType keyType);
     ~SkipList();
     SkipList(const SkipList&);
     SkipList& operator=(const SkipList&);
-};
-
-class SkipListTest
-{
-public:
-    struct KV
-    {
-        int m_Key;
-        int m_Value;
-        bool m_Added : 1;
-
-        KV()
-        : m_Added(false)
-        {
-        }
-
-        bool operator<(const KV& a) const
-        {
-            return m_Key < a.m_Key;
-        }
-    };
-
-    static void CreateRandomKeys(KV* kv, const int numKeys, const bool unique, const int range);
-
-    static void AddRandomKeys(const int numKeys, const bool unique, const int range);
-    static void AddRandomKeys2(const int numKeys, const bool unique, const int range);
-
-    static void AddDeleteRandomKeys(const int numKeys, const bool unique, const int range);
 };
 
 }   //namespace honeybase

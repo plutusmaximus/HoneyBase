@@ -55,6 +55,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -77,17 +78,25 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="btree.cpp" />
+    <ClCompile Include="command.cpp" />
     <ClCompile Include="dict.cpp" />
+    <ClCompile Include="error.cpp" />
     <ClCompile Include="hb.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="memfile.cpp" />
+    <ClCompile Include="network.cpp" />
     <ClCompile Include="skiplist.cpp" />
+    <ClCompile Include="tests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="btree.h" />
+    <ClInclude Include="command.h" />
     <ClInclude Include="dict.h" />
+    <ClInclude Include="error.h" />
     <ClInclude Include="hb.h" />
+    <ClInclude Include="network.h" />
     <ClInclude Include="skiplist.h" />
+    <ClInclude Include="tests.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

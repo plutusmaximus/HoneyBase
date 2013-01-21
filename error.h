@@ -8,12 +8,16 @@ enum ErrorCode
 {
     ERROR_NONE,
     ERROR_OUT_OF_MEMORY,
+    ERROR_UNRECOGNIZED_COMMAND,
+    ERROR_UNEXPECTED_TOKEN,
     ERROR_UNKNOWN
 };
 
 class Error
 {
 public:
+
+    void SetSucceeded();
 
     void SetSucceeded(const char* fmt, ...);
 
@@ -23,7 +27,7 @@ public:
 
     ErrorCode GetCode() const;
 
-    const char* GetMessage() const;
+    const char* GetText() const;
 
 private:
 
