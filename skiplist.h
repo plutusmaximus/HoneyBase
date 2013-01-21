@@ -25,7 +25,7 @@ public:
     static SkipNode* Create(const Key key, const Value value, const ValueType valueType);
     static void Destroy(SkipNode* node);
 
-    static const int BLOCK_LEN  = 64;
+    static const int BLOCK_LEN  = 96;
 
     SkipItem m_Items[BLOCK_LEN];
     int m_NumItems;

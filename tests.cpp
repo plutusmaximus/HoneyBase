@@ -430,7 +430,7 @@ HashTableSpeedTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder)
     s_Log.Debug("set: %f", sw.GetElapsed());
     s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
 
-    std::random_shuffle(&kv[0], &kv[numKeys]);
+    //std::random_shuffle(&kv[0], &kv[numKeys]);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -693,7 +693,7 @@ BTreeSpeedTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bo
     s_Log.Debug("insert: %f", sw.GetElapsed());
     s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
 
-    std::random_shuffle(&kv[0], &kv[numKeys]);
+    //std::random_shuffle(&kv[0], &kv[numKeys]);
 
     sw.Restart();
     for(int i = 0; i < numKeys; ++i)
@@ -796,7 +796,8 @@ SkipListTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool
     s_Log.Debug("delete: %f", sw.GetElapsed());
     s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
 
-    Heap::Free(skiplist);
+    SkipList::Destroy(skiplist);
+
     delete [] kv;
 }
 
@@ -865,9 +866,10 @@ SkipListTest::AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const boo
     {
         hbverify(skiplist->Delete2(kv[i].m_Key));
     }
-    sw.Stop();*/
+    sw.Stop();
 
-    Heap::Free(skiplist);
+    SkipList::Destroy(skiplist);*/
+
     delete [] kv;
 }
 
@@ -918,7 +920,113 @@ SkipListTest::AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, cons
         }
     }
 
-    Heap::Free(skiplist);
+    //SkipList::Destroy(skiplist);
+
+    delete [] kv;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//  SkipListSpeedTest
+///////////////////////////////////////////////////////////////////////////////
+SkipListSpeedTest::SkipListSpeedTest(const KeyType keyType, const ValueType valueType)
+: m_KeyType(keyType)
+, m_ValueType(valueType)
+{
+}
+
+void
+SkipListSpeedTest::AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
+{
+    SkipList* skiplist = SkipList::Create(m_KeyType);
+    Value value;
+    ValueType valueType;
+
+    StopWatch sw;
+
+    KV* kv = new KV[numKeys];
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Insert(kv[i].m_Key, kv[i].m_Value, m_ValueType);
+    }
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    //std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Find(kv[i].m_Key, &value, &valueType);
+    }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    s_Log.Debug("utilization: %f", skiplist->GetUtilization());
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Delete(kv[i].m_Key);
+    }
+    sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    SkipList::Destroy(skiplist);
+
+    delete [] kv;
+}
+
+void
+SkipListSpeedTest::AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range)
+{
+    SkipList* skiplist = SkipList::Create(m_KeyType);
+    Value value;
+    ValueType valueType;
+
+    StopWatch sw;
+
+    KV* kv = new KV[numKeys];
+    KV::CreateKeys(m_KeyType, KEY_SIZE_BLOB, m_ValueType, VALUE_SIZE_BLOB, keyOrder, kv, numKeys);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Insert2(kv[i].m_Key, kv[i].m_Value, m_ValueType);
+    }
+    sw.Stop();
+    s_Log.Debug("insert: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    //std::random_shuffle(&kv[0], &kv[numKeys]);
+
+    sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Find2(kv[i].m_Key, &value, &valueType);
+    }
+    sw.Stop();
+    s_Log.Debug("find: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    s_Log.Debug("utilization: %f", skiplist->GetUtilization());
+
+    /*sw.Restart();
+    for(int i = 0; i < numKeys; ++i)
+    {
+        skiplist->Delete(kv[i].m_Key);
+    }
+    sw.Stop();
+    s_Log.Debug("delete: %f", sw.GetElapsed());
+    s_Log.Debug("ops/sec: %f", numKeys/sw.GetElapsed());
+
+    SkipList::Destroy(skiplist);*/
+
     delete [] kv;
 }
 

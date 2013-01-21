@@ -230,82 +230,120 @@ SkipList::Insert2(const Key key, const Value value, const ValueType valueType)
 
         links[m_Height] = m_Head;
         SkipNode* cur = NULL;
+        SkipNode* prev = NULL;
 
         for(int i = m_Height-1; i >= 0; --i)
         {
             links[i] = links[i+1];
 
             for(cur = links[i][i]; cur->m_Links[i] && cur->m_Items[cur->m_NumItems-1].m_Key.LT(m_KeyType, key);
-                links[i] = cur->m_Links, cur = cur->m_Links[i])
+                links[i] = cur->m_Links, prev = cur, cur = cur->m_Links[i])
             {
             }
         }
 
         int idx = UpperBound(key, &cur->m_Items[0], &cur->m_Items[cur->m_NumItems]);
 
-        if(idx == hbarraylen(cur->m_Items))
+        if(cur->m_NumItems == hbarraylen(cur->m_Items))
         {
-            SkipNode* node = SkipNode::Create();
-            if(!hbverify(node))
+            SkipNode* next = cur->m_Links[0];
+            if(next && next->m_NumItems < hbarraylen(cur->m_Items)-1)
             {
-                return false;
+                //Shift nodes to our right neighbor.
+                const int numToMove = (hbarraylen(cur->m_Items) - next->m_NumItems)/2;
+                const int srcOffset = cur->m_NumItems - numToMove;
+                memmove(&next->m_Items[numToMove], &next->m_Items[0], next->m_NumItems*sizeof(SkipItem));
+                memcpy(&next->m_Items[0], &cur->m_Items[srcOffset], numToMove*sizeof(SkipItem));
+                cur->m_NumItems -= numToMove;
+                next->m_NumItems += numToMove;
+
+                if(idx >= cur->m_NumItems)
+                {
+                    idx -= cur->m_NumItems;
+                    cur = next;
+                }
             }
-
-            m_Capacity += hbarraylen(node->m_Items);
-
-            for(int i = m_Height-1; i >= 0; --i)
+            else if(prev && prev->m_NumItems < hbarraylen(cur->m_Items)-1)
             {
-                links[i] = links[i][i]->m_Links;
+                //Shift nodes to our left neighbor.
+                const int numToMove = (hbarraylen(cur->m_Items) - prev->m_NumItems)/2;
+                const int numLeft = cur->m_NumItems - numToMove;
+                memcpy(&prev->m_Items[prev->m_NumItems], &cur->m_Items[0], numToMove*sizeof(SkipItem));
+                memcpy(&cur->m_Items[0], &cur->m_Items[numToMove], numLeft*sizeof(SkipItem));
+                cur->m_NumItems -= numToMove;
+                prev->m_NumItems += numToMove;
+
+                idx -= numToMove;
+                if(idx < 0)
+                {
+                    cur = prev;
+                    idx += cur->m_NumItems;
+                }
             }
-
-            for(; m_Height < node->m_Height; ++m_Height)
+            else if(idx == hbarraylen(cur->m_Items))
             {
-                links[m_Height] = m_Head;
-            }
+                SkipNode* node = SkipNode::Create();
+                if(!hbverify(node))
+                {
+                    return false;
+                }
 
-            for(int i = node->m_Height-1; i >= 0; --i)
-            {
-                node->m_Links[i] = links[i][i];
-                links[i][i] = node;
-            }
+                m_Capacity += hbarraylen(node->m_Items);
 
-            cur = node;
-            idx = 0;
-        }
-        else if(cur->m_NumItems == hbarraylen(cur->m_Items))
-        {
-            SkipNode* node = SkipNode::Create();
-            if(!hbverify(node))
-            {
-                return false;
-            }
+                for(int i = m_Height-1; i >= 0; --i)
+                {
+                    links[i] = links[i][i]->m_Links;
+                }
 
-            m_Capacity += hbarraylen(node->m_Items);
+                for(; m_Height < node->m_Height; ++m_Height)
+                {
+                    links[m_Height] = m_Head;
+                }
 
-            const int numToMove = cur->m_NumItems/2;
-            const int numLeft = cur->m_NumItems - numToMove;
-            idx -= numToMove;
-            memcpy(&node->m_Items[0], &cur->m_Items[0], numToMove*sizeof(SkipItem));
-            memmove(&cur->m_Items[0], &cur->m_Items[numToMove], numLeft*sizeof(SkipItem));
+                for(int i = node->m_Height-1; i >= 0; --i)
+                {
+                    node->m_Links[i] = links[i][i];
+                    links[i][i] = node;
+                }
 
-            node->m_NumItems = numToMove;
-            cur->m_NumItems -= numToMove;
-
-            for(; m_Height < node->m_Height; ++m_Height)
-            {
-                links[m_Height] = m_Head;
-            }
-
-            for(int i = node->m_Height-1; i >= 0; --i)
-            {
-                node->m_Links[i] = links[i][i];
-                links[i][i] = node;
-            }
-
-            if(idx < 0)
-            {
                 cur = node;
-                idx += cur->m_NumItems;
+                idx = 0;
+            }
+            else
+            {
+                SkipNode* node = SkipNode::Create();
+                if(!hbverify(node))
+                {
+                    return false;
+                }
+
+                m_Capacity += hbarraylen(node->m_Items);
+
+                const int numToMove = cur->m_NumItems/2;
+                const int numLeft = cur->m_NumItems - numToMove;
+                memcpy(&node->m_Items[0], &cur->m_Items[0], numToMove*sizeof(SkipItem));
+                memmove(&cur->m_Items[0], &cur->m_Items[numToMove], numLeft*sizeof(SkipItem));
+
+                node->m_NumItems = numToMove;
+                cur->m_NumItems -= numToMove;
+
+                for(; m_Height < node->m_Height; ++m_Height)
+                {
+                    links[m_Height] = m_Head;
+                }
+
+                for(int i = node->m_Height-1; i >= 0; --i)
+                {
+                    node->m_Links[i] = links[i][i];
+                    links[i][i] = node;
+                }
+
+                idx -= numToMove;
+                if(idx < 0)
+                {
+                    cur = node;
+                    idx += cur->m_NumItems;
+                }
             }
         }
 

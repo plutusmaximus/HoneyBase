@@ -150,4 +150,20 @@ private:
     const ValueType m_ValueType;
 };
 
+class SkipListSpeedTest
+{
+public:
+
+    SkipListSpeedTest(const KeyType keyType, const ValueType valueType);
+
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+    void AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+private:
+
+    const KeyType m_KeyType;
+    const ValueType m_ValueType;
+};
+
 }   //namespace honeybase
