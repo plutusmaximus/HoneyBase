@@ -26,7 +26,7 @@ int main(int /*argc*/, char** /*argv*/)
 
     const int NUMKEYS = 1000*1000;
 
-    const KeyType keyType = KEYTYPE_INT;
+    const KeyType keyType = KEYTYPE_BLOB;
     const ValueType valueType = VALUETYPE_BLOB;
     const TestKeyOrder keyOrder = KEYORDER_RANDOM;
 
@@ -38,6 +38,7 @@ int main(int /*argc*/, char** /*argv*/)
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());
 
     s_Log.Debug("SPEED BTREEE");
     sw.Restart();
@@ -47,60 +48,67 @@ int main(int /*argc*/, char** /*argv*/)
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());
 
-    s_Log.Debug("SPEED SKIPLIST");
+    /*s_Log.Debug("SPEED SKIPLIST");
     sw.Restart();
     {
         SkipListSpeedTest test(keyType, valueType);
-        test.AddKeys2(NUMKEYS, keyOrder, true, 0);
+        test.AddKeys(NUMKEYS, keyOrder, true, 0);
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());*/
+
+    s_Log.Debug("SPEED SORTEDSET");
+    sw.Restart();
+    {
+        SortedSetSpeedTest test(keyType, valueType);
+        test.AddKeys(NUMKEYS, keyOrder, true, 0);
+    }
+    sw.Stop();
+    s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());
 
     /*s_Log.Debug("DICT");
     sw.Restart();
     {
         HashTableTest test(keyType, valueType);
-        test.AddRandomKeys(NUMKEYS);
+        test.AddKeys(NUMKEYS, keyOrder);
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());*/
 
-    s_Log.Debug("BTREEE");
+    /*s_Log.Debug("BTREEE");
     sw.Restart();
     {
         BTreeTest test(keyType, valueType);
-        test.AddRandomKeys(NUMKEYS, true, 0);
+        test.AddKeys(NUMKEYS, keyOrder, true, 0);
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
-
-    s_Log.Debug("BTREEE(asc)");
-    sw.Restart();
-    {
-        BTreeTest test(keyType, valueType);
-        test.AddSortedKeys(NUMKEYS, true, 0, true);
-    }
-    sw.Stop();
-    s_Log.Debug("total: %f", sw.GetElapsed());
-
-    s_Log.Debug("BTREEE(desc)");
-    sw.Restart();
-    {
-        BTreeTest test(keyType, valueType);
-        test.AddSortedKeys(NUMKEYS, true, 0, false);
-    }
-    sw.Stop();
-    s_Log.Debug("total: %f", sw.GetElapsed());*/
+    hbassert(0 == Blob::GlobalBlobCount());*/
 
     /*s_Log.Debug("SKIPLIST");
     sw.Restart();
     {
         SkipListTest test(keyType, valueType);
-        test.AddKeys2(NUMKEYS, keyOrder, true, 0);
+        test.AddKeys(NUMKEYS, keyOrder, true, 0);
     }
     sw.Stop();
-    s_Log.Debug("total: %f", sw.GetElapsed());*/
+    s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());*/
+
+    /*s_Log.Debug("SORTEDSET");
+    sw.Restart();
+    {
+        SortedSetTest test(keyType, valueType);
+        test.AddKeys(NUMKEYS, keyOrder, true, 0);
+    }
+    sw.Stop();
+    s_Log.Debug("total: %f", sw.GetElapsed());
+    hbassert(0 == Blob::GlobalBlobCount());*/
 }
 
 #include <string.h>

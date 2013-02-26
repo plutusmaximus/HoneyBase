@@ -8,7 +8,7 @@ namespace honeybase
 
 static Log s_Log("btree");
 
-#define UB 1
+#define UB 0
 
 template<typename T>
 static inline void MoveBytes(T* dst, const T* src, const size_t count)
@@ -19,76 +19,32 @@ static inline void MoveBytes(T* dst, const T* src, const size_t count)
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-//  BTreeIterator
-///////////////////////////////////////////////////////////////////////////////
-BTreeIterator::BTreeIterator()
+static inline void Assign(Key& a, const Key& b, const KeyType keyType)
 {
-    Clear();
-}
-
-BTreeIterator::~BTreeIterator()
-{
-}
-
-void
-BTreeIterator::Clear()
-{
-    m_Cur = NULL;
-    m_ItemIndex = 0;
-}
-
-bool
-BTreeIterator::HasNext() const
-{
-    if(m_Cur)
+    if(KEYTYPE_BLOB == keyType)
     {
-        return (m_ItemIndex < m_Cur->m_NumKeys-1)
-                || (NULL != m_Cur->m_Items[m_Cur->m_MaxKeys].m_Node);
+        //a.m_Blob = b.m_Blob->Dup();
+        a.m_Blob = b.m_Blob->Ref();
     }
-
-    return false;
-}
-
-bool
-BTreeIterator::HasCurrent() const
-{
-    return NULL != m_Cur;
-}
-
-bool
-BTreeIterator::Next()
-{
-    if(m_Cur)
+    else
     {
-        ++m_ItemIndex;
-
-        if(m_ItemIndex >= m_Cur->m_NumKeys)
-        {
-            m_Cur = m_Cur->m_Items[m_Cur->m_MaxKeys].m_Node;
-            m_ItemIndex = 0;
-        }
+        hb_static_assert(sizeof(a.m_Int) == sizeof(a.m_Double));
+        a.m_Int = b.m_Int;
     }
-
-    return (NULL != m_Cur);
 }
 
-Key
-BTreeIterator::GetKey()
+static inline void Assign(Value& a, const Value& b, const ValueType valueType)
 {
-    return m_Cur->m_Keys[m_ItemIndex];
-}
-
-Value
-BTreeIterator::GetValue()
-{
-    return m_Cur->m_Items[m_ItemIndex].m_Value;
-}
-
-ValueType
-BTreeIterator::GetValueType()
-{
-    return m_Cur->m_Items[m_ItemIndex].m_ValueType;
+    if(VALUETYPE_BLOB == valueType)
+    {
+        //a.m_Blob = b.m_Blob->Dup();
+        a.m_Blob = b.m_Blob->Ref();
+    }
+    else
+    {
+        hb_static_assert(sizeof(a.m_Int) == sizeof(a.m_Double));
+        a.m_Int = b.m_Int;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -130,7 +86,7 @@ BTree::Destroy(BTree* btree)
 }
 
 bool
-BTree::Insert(const Key key, const Value value, const ValueType valueType)
+BTree::Insert(const Key& key, const Value& value, const ValueType valueType)
 {
     if(!m_Nodes)
     {
@@ -142,8 +98,27 @@ BTree::Insert(const Key key, const Value value, const ValueType valueType)
 
         ++m_Depth;
 
-        m_Nodes->m_Keys[0] = key;
-        m_Nodes->m_Items[0].m_Value = value;
+        Assign(m_Nodes->m_Keys[0], key, m_KeyType);
+        Assign(m_Nodes->m_Items[0].m_Value, value, valueType);
+
+        /*if(KEYTYPE_BLOB == m_KeyType)
+        {
+            m_Nodes->m_Keys[0].m_Blob = key.m_Blob->Dup();
+        }
+        else
+        {
+            m_Nodes->m_Keys[0] = key;
+        }
+
+        if(VALUETYPE_BLOB == valueType)
+        {
+            m_Nodes->m_Items[0].m_Value.m_Blob = value.m_Blob->Dup();
+        }
+        else
+        {
+            m_Nodes->m_Items[0].m_Value = value;
+        }*/
+
         m_Nodes->m_Items[0].m_ValueType = valueType;
         ++m_Nodes->m_NumKeys;
 
@@ -267,9 +242,11 @@ BTree::Insert(const Key key, const Value value, const ValueType valueType)
 
                 //Copy the last key in the node up into the parent.
 #if UB
-                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
+                Assign(parent->m_Keys[keyIdx], node->m_Keys[splitLoc], m_KeyType);
+                //parent->m_Keys[keyIdx] = node->m_Keys[splitLoc];
 #else
-                parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
+                Assign(parent->m_Keys[keyIdx], node->m_Keys[splitLoc-1], m_KeyType);
+                //parent->m_Keys[keyIdx] = node->m_Keys[splitLoc-1];
 #endif
 
                 //Insert the new node into the linked list of nodes
@@ -316,7 +293,7 @@ BTree::Insert(const Key key, const Value value, const ValueType valueType)
             }
         }
 
-        keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(m_KeyType, key, node->m_Keys, node->m_NumKeys);
         hbassert(keyIdx >= 0);
 
         if(!isLeaf)
@@ -329,8 +306,27 @@ BTree::Insert(const Key key, const Value value, const ValueType valueType)
     MoveBytes(&node->m_Keys[keyIdx+1], &node->m_Keys[keyIdx], node->m_NumKeys-keyIdx);
     MoveBytes(&node->m_Items[keyIdx+1], &node->m_Items[keyIdx], node->m_NumKeys-keyIdx);
 
-    node->m_Keys[keyIdx] = key;
-    node->m_Items[keyIdx].m_Value = value;
+    Assign(node->m_Keys[keyIdx], key, m_KeyType);
+    Assign(node->m_Items[keyIdx].m_Value, value, valueType);
+
+    /*if(KEYTYPE_BLOB == m_KeyType)
+    {
+        node->m_Keys[keyIdx].m_Blob = key.m_Blob->Dup();
+    }
+    else
+    {
+        node->m_Keys[keyIdx] = key;
+    }
+
+    if(VALUETYPE_BLOB == valueType)
+    {
+        node->m_Items[keyIdx].m_Value.m_Blob = value.m_Blob->Dup();
+    }
+    else
+    {
+        node->m_Items[keyIdx].m_Value = value;
+    }*/
+
     node->m_Items[keyIdx].m_ValueType = valueType;
     ++node->m_NumKeys;
 
@@ -342,7 +338,7 @@ BTree::Insert(const Key key, const Value value, const ValueType valueType)
 }
 
 bool
-BTree::Delete(const Key key)
+BTree::Delete(const Key& key)
 {
     BTreeNode* node = m_Nodes;
     BTreeNode* parent = NULL;
@@ -435,12 +431,12 @@ BTree::Delete(const Key key)
             }
         }
 
-        parentKeyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        parentKeyIdx = Bound(m_KeyType, key, node->m_Keys, node->m_NumKeys);
         parent = node;
         node = parent->m_Items[parentKeyIdx].m_Node;
     }
 
-    int keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+    int keyIdx = Bound(m_KeyType, key, node->m_Keys, node->m_NumKeys);
 
 #if UB
     if(keyIdx > 0 && keyIdx <= node->m_NumKeys)
@@ -453,6 +449,20 @@ BTree::Delete(const Key key)
 #endif
         if(key.EQ(m_KeyType, node->m_Keys[keyIdx]))
         {
+            if(KEYTYPE_BLOB == m_KeyType)
+            {
+                node->m_Keys[keyIdx].m_Blob->Unref();
+                //Blob::Destroy(node->m_Keys[keyIdx].m_Blob);
+                //HB_DEBUGONLY(node->m_Keys[keyIdx].m_Blob = NULL);
+            }
+
+            if(VALUETYPE_BLOB == node->m_Items[keyIdx].m_ValueType)
+            {
+                node->m_Items[keyIdx].m_Value.m_Blob->Unref();
+                //Blob::Destroy(node->m_Items[keyIdx].m_Value.m_Blob);
+                //HB_DEBUGONLY(node->m_Items[keyIdx].m_Value.m_Blob = NULL);
+            }
+
             if(node->m_NumKeys > 1)
             {
                 //Remove the item from the leaf
@@ -504,10 +514,19 @@ BTree::Delete(const Key key)
                     {
                         if(parentKeyIdx <= parent->m_NumKeys)
                         {
+                            if(KEYTYPE_BLOB == m_KeyType)
+                            {
+                                parent->m_Keys[parentKeyIdx].m_Blob->Unref();
+                            }
+
                             parent->m_Items[parentKeyIdx].m_Node = parent->m_Items[parentKeyIdx+1].m_Node;
 
                             MoveBytes(&parent->m_Keys[parentKeyIdx], &parent->m_Keys[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx);
                             MoveBytes(&parent->m_Items[parentKeyIdx], &parent->m_Items[parentKeyIdx+1], parent->m_NumKeys-parentKeyIdx+1);
+                        }
+                        else if(KEYTYPE_BLOB == m_KeyType)
+                        {
+                            parent->m_Keys[parent->m_NumKeys].m_Blob->Unref();
                         }
 #if TRIM_NODE
                         TrimNode(parent, m_Depth-2);
@@ -523,6 +542,11 @@ BTree::Delete(const Key key)
                         //parent becomes a leaf
 
                         hbassert(parent == m_Nodes);
+
+                        if(KEYTYPE_BLOB == m_KeyType)
+                        {
+                            parent->m_Keys[0].m_Blob->Unref();
+                        }
 
                         BTreeNode* child;
                         child = (0 == parentKeyIdx)
@@ -576,7 +600,7 @@ BTree::DeleteAll()
 }
 
 bool
-BTree::Find(const Key key, Value* value, ValueType* valueType) const
+BTree::Find(const Key& key, Value* value, ValueType* valueType) const
 {
     const BTreeNode* node;
     const BTreeNode* parent;
@@ -586,22 +610,6 @@ BTree::Find(const Key key, Value* value, ValueType* valueType) const
         *value = node->m_Items[keyIdx].m_Value;
         *valueType = node->m_Items[keyIdx].m_ValueType;
         return true;
-    }
-
-    return false;
-}
-
-bool
-BTree::GetFirst(BTreeIterator* it)
-{
-    if(m_Leaves)
-    {
-        it->m_Cur = m_Leaves;
-        return true;
-    }
-    else
-    {
-        it->Clear();
     }
 
     return false;
@@ -649,11 +657,11 @@ BTree::Validate()
 //private:
 
 bool
-BTree::Find(const Key key,
-                const BTreeNode** outNode,
-                int* outKeyIdx,
-                const BTreeNode** outParent,
-                int* outParentKeyIdx) const
+BTree::Find(const Key& key,
+            const BTreeNode** outNode,
+            int* outKeyIdx,
+            const BTreeNode** outParent,
+            int* outParentKeyIdx) const
 {
     BTreeNode* tmpNode;
     BTreeNode* tmpParent;
@@ -665,11 +673,11 @@ BTree::Find(const Key key,
 }
 
 bool
-BTree::Find(const Key key,
-                BTreeNode** outNode,
-                int* outKeyIdx,
-                BTreeNode** outParent,
-                int* outParentKeyIdx)
+BTree::Find(const Key& key,
+            BTreeNode** outNode,
+            int* outKeyIdx,
+            BTreeNode** outParent,
+            int* outParentKeyIdx)
 {
     BTreeNode* node = m_Nodes;
     BTreeNode* parent = NULL;
@@ -678,7 +686,7 @@ BTree::Find(const Key key,
 
     for(int depth = 0; depth < m_Depth; ++depth)
     {
-        keyIdx = Bound(m_KeyType, key, node->m_Keys, &node->m_Keys[node->m_NumKeys]);
+        keyIdx = Bound(m_KeyType, key, node->m_Keys, node->m_NumKeys);
         if(depth < m_Depth-1)
         {
             parent = node;
@@ -739,23 +747,13 @@ BTree::MergeLeft(BTreeNode* parent, const int keyIdx, const int count, const int
     {
         sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
         parent->m_Keys[keyIdx-1] = node->m_Keys[count-1];
+
         MoveBytes(&sibling->m_Keys[sibling->m_NumKeys+1], &node->m_Keys[0], count-1);
         MoveBytes(&sibling->m_Items[sibling->m_NumKeys+1], &node->m_Items[0], count);
         MoveBytes(&node->m_Keys[0], &node->m_Keys[count], node->m_NumKeys-count);
         MoveBytes(&node->m_Items[0], &node->m_Items[count], node->m_NumKeys-count+1);
         sibling->m_NumKeys += count;
         node->m_NumKeys -= count;
-
-        /*for(int i = 0; i < count; ++i)
-        {
-            sibling->m_Keys[sibling->m_NumKeys] = parent->m_Keys[keyIdx-1];
-            parent->m_Keys[keyIdx-1] = node->m_Keys[0];
-            sibling->m_Items[sibling->m_NumKeys+1] = node->m_Items[0];
-            MoveBytes(&node->m_Keys[0], &node->m_Keys[1], node->m_NumKeys-1);
-            MoveBytes(&node->m_Items[0], &node->m_Items[1], node->m_NumKeys);
-            ++sibling->m_NumKeys;
-            --node->m_NumKeys;
-        }*/
 
         if(0 == node->m_NumKeys)
         {
@@ -784,8 +782,20 @@ BTree::MergeLeft(BTreeNode* parent, const int keyIdx, const int count, const int
         if(node->m_NumKeys > 0)
         {
 #if UB
+            if(KEYTYPE_BLOB == m_KeyType)
+            {
+                parent->m_Keys[keyIdx-1].m_Blob->Unref();
+                node->m_Keys[0].m_Blob->Ref();
+            }
+            //Assign(parent->m_Keys[keyIdx-1], node->m_Keys[0], m_KeyType);
             parent->m_Keys[keyIdx-1] = node->m_Keys[0];
 #else
+            if(KEYTYPE_BLOB == m_KeyType)
+            {
+                parent->m_Keys[keyIdx-1].m_Blob->Unref();
+                sibling->m_Keys[sibling->m_NumKeys-1].m_Blob->Ref();
+            }
+            //Assign(parent->m_Keys[keyIdx-1], sibling->m_Keys[sibling->m_NumKeys-1], m_KeyType);
             parent->m_Keys[keyIdx-1] = sibling->m_Keys[sibling->m_NumKeys-1];
 #endif
         }
@@ -866,17 +876,6 @@ BTree::MergeRight(BTreeNode* parent, const int keyIdx, const int count, const in
         sibling->m_NumKeys += count;
         node->m_NumKeys -= count;
 
-        /*for(int i = 0; i < count; ++i)
-        {
-            MoveBytes(&sibling->m_Keys[1], &sibling->m_Keys[0], sibling->m_NumKeys);
-            MoveBytes(&sibling->m_Items[1], &sibling->m_Items[0], sibling->m_NumKeys+1);
-            sibling->m_Keys[0] = parent->m_Keys[keyIdx];
-            parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
-            sibling->m_Items[0] = node->m_Items[node->m_NumKeys];
-            ++sibling->m_NumKeys;
-            --node->m_NumKeys;
-        }*/
-
         if(0 == node->m_NumKeys)
         {
             hbassert(!sibling->IsFull());
@@ -907,8 +906,20 @@ BTree::MergeRight(BTreeNode* parent, const int keyIdx, const int count, const in
         if(node->m_NumKeys > 0)
         {
 #if UB
+            if(KEYTYPE_BLOB == m_KeyType)
+            {
+                parent->m_Keys[keyIdx].m_Blob->Unref();
+                sibling->m_Keys[0].m_Blob->Ref();
+            }
+            //Assign(parent->m_Keys[keyIdx], sibling->m_Keys[0], m_KeyType);
             parent->m_Keys[keyIdx] = sibling->m_Keys[0];
 #else
+            if(KEYTYPE_BLOB == m_KeyType)
+            {
+                parent->m_Keys[keyIdx].m_Blob->Unref();
+                node->m_Keys[node->m_NumKeys-1].m_Blob->Ref();
+            }
+            //Assign(parent->m_Keys[keyIdx], node->m_Keys[node->m_NumKeys-1], m_KeyType);
             parent->m_Keys[keyIdx] = node->m_Keys[node->m_NumKeys-1];
 #endif
         }
@@ -956,7 +967,7 @@ BTree::TrimNode(BTreeNode* node, const int depth)
 
     for(int i = node->m_NumKeys; i < node->m_MaxKeys; ++i)
     {
-        node->m_Keys[i].Set(s64(0));
+        node->m_Keys[i].m_Int = 0;
     }
 
     if(!isLeaf)
@@ -1023,37 +1034,40 @@ BTree::ValidateNode(const int depth, BTreeNode* node)
 
     if(!isLeaf)
     {
-        //Make sure all the keys in the child are <= the current key.
+        //Make sure all the keys in the child are < the current key.
+        //(or <= the current key if using LowerBound)
         for(int i = 0; i < node->m_NumKeys; ++i)
         {
-            const Key key = node->m_Keys[i];
+            const Key& key = node->m_Keys[i];
             const BTreeNode* child = node->m_Items[i].m_Node;
             for(int j = 0; j < child->m_NumKeys; ++j)
             {
 #if ALLOW_DUPS
                 hbassert(child->m_Keys[j].LE(m_KeyType, key));
-#else
+#elif UB
                 hbassert(child->m_Keys[j].LT(m_KeyType, key));
+#else
+                hbassert(child->m_Keys[j].LE(m_KeyType, key));
 #endif
             }
 
 #if !UB
-            if(i < node->m_NumKeys-1)
+            if(i < node->m_NumKeys-1 && GetKeyType() == KEYTYPE_INT)
             {
                 //If the right sibling's first key is the child's last key plus 1
                 //then make sure the parent's key is equal to the child's last key
                 //because the child's keys must be <= the parent's key
                 const BTreeNode* nextChild = node->m_Items[i+1].m_Node;
-                if(child->m_Keys[child->m_NumKeys-1]+1 == nextChild->m_Keys[0])
+                if(child->m_Keys[child->m_NumKeys-1].m_Int+1 == nextChild->m_Keys[0].m_Int)
                 {
-                    hbassert(node->m_Keys[i] == child->m_Keys[child->m_NumKeys-1]);
+                    hbassert(node->m_Keys[i].m_Int == child->m_Keys[child->m_NumKeys-1].m_Int);
                 }
             }
 #endif
         }
 
         //Make sure all the keys in the right sibling are >= keys in the left sibling.
-        const Key key = node->m_Keys[node->m_NumKeys-1];
+        const Key& key = node->m_Keys[node->m_NumKeys-1];
         const BTreeNode* rightSibling = node->m_Items[node->m_NumKeys].m_Node;
         for(int j = 0; j < rightSibling->m_NumKeys; ++j)
         {
@@ -1083,15 +1097,11 @@ BTree::ValidateNode(const int depth, BTreeNode* node)
 BTreeNode*
 BTree::AllocNode(const int numKeys)
 {
-    const size_t size = sizeof(BTreeNode) + (numKeys*(sizeof(Key)+sizeof(BTreeItem)));
-    BTreeNode* node = (BTreeNode*)Heap::ZAlloc(size);
-    //BTreeNode* node = (BTreeNode*)Heap::ZAlloc(sizeof(BTreeNode));
+    BTreeNode* node = (BTreeNode*)Heap::ZAlloc(sizeof(BTreeNode));
     if(node)
     {
         const_cast<int&>(node->m_MaxKeys) = numKeys;
         m_Capacity += node->m_MaxKeys+1;
-
-        node->m_Keys = (Key*)&node->m_Items[numKeys+1];
     }
 
     return node;
@@ -1108,75 +1118,110 @@ BTree::FreeNode(BTreeNode* node)
 }
 
 int
-BTree::Bound(const KeyType keyType, const Key key, const Key* first, const Key* end)
+BTree::Bound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys)
 {
 #if UB
-    return UpperBound(keyType, key, first, end);
+    return UpperBound(keyType, key, first, numKeys);
 #else
-    return LowerBound(keyType, key, first, end);
+    return LowerBound(keyType, key, first, numKeys);
 #endif
 }
 
 int
-BTree::LowerBound(const KeyType keyType, const Key key, const Key* first, const Key* end)
+BTree::LowerBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys)
 {
-    //DUPS
-    //if(end >= first)
-    if(end > first)
+    const Key* cur = first;
+    size_t count = numKeys;
+    while(count > 0)
     {
-        const Key* cur = first;
-        size_t count = end - first;
-        while(count > 0)
+        const Key* nextKey = cur;
+        size_t step = count >> 1;
+        nextKey += step;
+        if(nextKey->LT(keyType, key))
         {
-            const Key* item = cur;
-            size_t step = count >> 1;
-            item += step;
-            if(item->LT(keyType, key))
-            {
-                cur = ++item;
-                count -= step + 1;
-            }
-            else
-            {
-                count = step;
-            }
+            cur = ++nextKey;
+            count -= step + 1;
         }
-
-        return cur - first;
+        else
+        {
+            count = step;
+        }
     }
 
-    return -1;
+    return cur - first;
 }
 
 int
-BTree::UpperBound(const KeyType keyType, const Key key, const Key* first, const Key* end)
+BTree::UpperBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys)
 {
-    //DUPS
-    //if(end >= first)
-    if(end > first)
+    const Key* cur = first;
+    size_t count = numKeys;
+    while(count > 0)
     {
-        const Key* cur = first;
-        size_t count = end - first;
-        while(count > 0)
+        const Key* nextKey = cur;
+        size_t step = count >> 1;
+        nextKey += step;
+        if(!key.LT(keyType, *nextKey))
         {
-            const Key* item = cur;
-            size_t step = count >> 1;
-            item += step;
-            if(!(key.LT(keyType, *item)))
-            {
-                cur = ++item;
-                count -= step + 1;
-            }
-            else
-            {
-                count = step;
-            }
+            cur = ++nextKey;
+            count -= step + 1;
         }
-
-        return cur - first;
+        else
+        {
+            count = step;
+        }
     }
 
-    return -1;
+    return cur - first;
+}
+
+static bool LT(const KeyType keyType, const Key& keyA, const Key& keyB,
+                const ValueType valueTypeA, const Value& valueA,
+                const ValueType valueTypeB, const Value& valueB)
+{
+    int cmp = keyA.Compare(keyType, keyB);
+
+    if(0 == cmp)
+    {
+        if(valueTypeA == valueTypeB)
+        {
+            cmp = valueA.Compare(valueTypeA, valueB);
+        }
+        else
+        {
+            cmp = int(valueTypeA - valueTypeB);
+        }
+    }
+
+    return cmp < 0;
+}
+
+int
+BTree::UpperBound(const KeyType keyType, const Key& key, const ValueType valueType, const Value& value,
+                    const Key* firstKey, const BTreeItem* firstItem, const size_t numKeys)
+{
+    const Key* curKey = firstKey;
+    const BTreeItem* curItem = firstItem;
+    size_t count = numKeys;
+    while(count > 0)
+    {
+        const Key* nextKey = curKey;
+        const BTreeItem* nextItem = curItem;
+        size_t step = count >> 1;
+        nextKey += step;
+        nextItem += step;
+        if(!LT(keyType, key, *nextKey, valueType, value, nextItem->m_ValueType, nextItem->m_Value))
+        {
+            curKey = ++nextKey;
+            count -= step + 1;
+        }
+        else
+        {
+            count = step;
+        }
+    }
+
+    return curKey - firstKey;
 }
 
 }   //namespace honeybase

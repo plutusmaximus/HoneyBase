@@ -6,17 +6,22 @@ namespace honeybase
 enum TestKeyOrder
 {
     KEYORDER_RANDOM,
-    KEYORDER_SEQUENTIAL
+    KEYORDER_ASCENDING,
+    KEYORDER_DESCENDING
 };
 
 class KV
 {
 public:
-    static void CreateKeys(const KeyType keyType,
+    static KV* CreateKeys(const KeyType keyType,
                             const size_t keySize,
                             const ValueType valueType,
                             const size_t valueSize,
                             const TestKeyOrder keyOrder,
+                            const int numKeys);
+
+    static void DestroyKeys(const KeyType keyType,
+                            const ValueType valueType,
                             KV* kv,
                             const int numKeys);
 
@@ -27,6 +32,18 @@ public:
 
     bool m_Added : 1;
 
+    bool operator<(const KV& a) const
+    {
+        return m_Key.LT(m_KeyType, a.m_Key);
+    }
+
+    bool operator>(const KV& a) const
+    {
+        return m_Key.GT(m_KeyType, a.m_Key);
+    }
+
+private:
+
     KV()
     : m_KeyType(KEYTYPE_INT)
     , m_ValueType(VALUETYPE_INT)
@@ -34,37 +51,7 @@ public:
     {
     }
 
-    ~KV();
-
-    bool operator<(const KV& a) const
-    {
-        switch(m_KeyType)
-        {
-            case KEYTYPE_INT:
-                return m_Key.m_Int < a.m_Key.m_Int;
-            case KEYTYPE_DOUBLE:
-                return m_Key.m_Double < a.m_Key.m_Double;
-            case KEYTYPE_BLOB:
-                return m_Key.m_Blob->LT(a.m_Key.m_Blob);
-        }
-
-        return m_Key.m_Int < a.m_Key.m_Int;
-    }
-
-    bool operator>(const KV& a) const
-    {
-        switch(m_KeyType)
-        {
-            case KEYTYPE_INT:
-                return m_Key.m_Int > a.m_Key.m_Int;
-            case KEYTYPE_DOUBLE:
-                return m_Key.m_Double > a.m_Key.m_Double;
-            case KEYTYPE_BLOB:
-                return m_Key.m_Blob->GT(a.m_Key.m_Blob);
-        }
-
-        return m_Key.m_Int > a.m_Key.m_Int;
-    }
+    //~KV();
 };
 
 class HashTableTest
@@ -140,7 +127,6 @@ public:
     SkipListTest(const KeyType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
-    void AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
     void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
@@ -158,7 +144,37 @@ public:
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
-    void AddKeys2(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+private:
+
+    const KeyType m_KeyType;
+    const ValueType m_ValueType;
+};
+
+class SortedSetTest
+{
+public:
+
+    SortedSetTest(const KeyType keyType, const ValueType valueType);
+
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+    void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+private:
+
+    const KeyType m_KeyType;
+    const ValueType m_ValueType;
+};
+
+class SortedSetSpeedTest
+{
+public:
+
+    SortedSetSpeedTest(const KeyType keyType, const ValueType valueType);
+
+    void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
+
+    void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
 private:
 

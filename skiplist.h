@@ -15,14 +15,13 @@ class SkipItem
 
     Key m_Key;
     Value m_Value;
-    ValueType m_ValType;
+    ValueType m_ValueType   : 4;
 };
 
 class SkipNode
 {
 public:
     static SkipNode* Create();
-    static SkipNode* Create(const Key key, const Value value, const ValueType valueType);
     static void Destroy(SkipNode* node);
 
     static const int BLOCK_LEN  = 96;
@@ -30,13 +29,9 @@ public:
     SkipItem m_Items[BLOCK_LEN];
     int m_NumItems;
 
-    Key m_Key;
-    Value m_Value;
     int m_Height;
 
-    ValueType m_ValType : 4;
-
-    //This must be the last member in var in the class.
+    //*** This must be the last member in the class. ***
     SkipNode* m_Links[1];
 
 private:
@@ -57,26 +52,26 @@ public:
 
     bool Insert(const Key key, const Value value, const ValueType valueType);
 
-    bool Insert2(const Key key, const Value value, const ValueType valueType);
-
     bool Delete(const Key key);
 
     bool Find(const Key key, Value* value, ValueType* valueType) const;
 
-    bool Find2(const Key key, Value* value, ValueType* valueType) const;
+    KeyType GetKeyType() const
+    {
+        return m_KeyType;
+    }
+
+    u64 Count() const;
 
     double GetUtilization() const;
     
+private:
+
     const KeyType m_KeyType;
     int m_Height;
-    unsigned m_Count;
-    unsigned m_Capacity;
     SkipNode* m_Head[MAX_HEIGHT];
-
-private:
-    
-    bool Insert(SkipNode* node);
-    const SkipNode* Find(const Key key) const;
+    u64 m_Count;
+    u64 m_Capacity;
 
     int LowerBound(const Key key, const SkipItem* first, const SkipItem* end) const;
     int UpperBound(const Key key, const SkipItem* first, const SkipItem* end) const;

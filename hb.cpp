@@ -1,6 +1,7 @@
 #include "hb.h"
 
 #include <malloc.h>
+#include <new.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -11,6 +12,9 @@
 
 namespace honeybase
 {
+
+//Make sure our double and int are the same size.
+hb_static_assert(sizeof(((Value*)0)->m_Double) == sizeof(((Value*)0)->m_Int));
 
 static unsigned m_w = 77665;    /* must not be zero */
 static unsigned m_z = 22559;    /* must not be zero */
@@ -145,10 +149,40 @@ Log::Error(const char* fmt, ...)
 ///////////////////////////////////////////////////////////////////////////////
 //  Heap
 ///////////////////////////////////////////////////////////////////////////////
+
+//static byte* s_Heap = (byte*)malloc(1024*1024*1024);
+//static byte* s_Heap = (byte*)VirtualAlloc(NULL, 1024*1024*1024, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+//static size_t s_NextAlloc = 0;
+
+/*static int InitHeap()
+{
+    memset(s_Heap, 0, 1024*1024*1024);
+    return 1;
+}*/
+
+//static const int FOO = InitHeap();
+
 void*
 Heap::ZAlloc(size_t size)
 {
-	return calloc(1, size);
+    void* p = malloc(size);
+    /*void* p = &s_Heap[s_NextAlloc];
+    s_NextAlloc += size;*/
+    if(p)
+    {
+        memset(p, 0, size);
+    }
+
+    return p;
+}
+void*
+Heap::Alloc(size_t size)
+{
+    /*void* p = &s_Heap[s_NextAlloc];
+    s_NextAlloc += size;
+    return p;*/
+
+    return malloc(size);
 }
 
 void
@@ -160,6 +194,10 @@ Heap::Free(void* mem)
 ///////////////////////////////////////////////////////////////////////////////
 //  Blob
 ///////////////////////////////////////////////////////////////////////////////
+static size_t s_NumBlobs = 0;
+
+StopWatch Blob::sm_StopWatch;
+
 Blob*
 Blob::Create(const size_t len)
 {
@@ -170,10 +208,12 @@ Blob*
 Blob::Create(const byte* bytes, const size_t len)
 {
     const size_t size = Size(len);
-    Blob* blob = (Blob*) Heap::ZAlloc(size);
+    Blob* blob = (Blob*) Heap::Alloc(size);
     if(blob)
     {
+        new(blob) Blob();
         Init(blob, bytes, len);
+        ++s_NumBlobs;
     }
 
     return blob;
@@ -182,9 +222,10 @@ Blob::Create(const byte* bytes, const size_t len)
 Blob*
 Blob::Dup(const Blob* blob)
 {
-    Blob* newBlob = (Blob*) Heap::ZAlloc(blob->Size());
+    Blob* newBlob = (Blob*) Heap::Alloc(Blob::Size(blob->Length()));
     if(newBlob)
     {
+        new(newBlob) Blob();
         const byte* bytes;
         const size_t len = blob->GetData(&bytes);
         Init(newBlob, bytes, len);
@@ -198,9 +239,10 @@ Blob::Destroy(Blob* blob)
 {
     blob->~Blob();
     Heap::Free(blob);
+    --s_NumBlobs;
 }
 
-Blob*
+/*Blob*
 Blob::Encode(const byte* src, const size_t srcLen,
                 byte* dst, const size_t dstSize)
 {
@@ -212,7 +254,7 @@ Blob::Encode(const byte* src, const size_t srcLen,
     }
 
     return NULL;
-}
+}*/
 
 size_t
 Blob::Size(const size_t len)
@@ -224,14 +266,14 @@ Blob::Size(const size_t len)
     {
     }
 
-    return size;
+    return size + sizeof(Blob) - 1;
 }
 
 size_t
 Blob::GetData(const byte** data) const
 {
     size_t len = 0;
-    const byte* p = (const byte*)this;
+    const byte* p = bytes;
     int shift = 0;
 
     while(*p & 0x80)
@@ -267,7 +309,7 @@ size_t
 Blob::Length() const
 {
     size_t len = 0;
-    const byte* p = (const byte*)this;
+    const byte* p = bytes;
     int shift = 0;
 
     while(*p & 0x80)
@@ -281,33 +323,43 @@ Blob::Length() const
     return len;
 }
 
-size_t
-Blob::Size() const
-{
-    size_t size = 0;
-    const byte* p = (const byte*)this;
-    int shift = 0;
-
-    while(*p & 0x80)
-    {
-        size |= (*p++ & 0x7F) << shift;
-        shift += 7;
-    }
-
-    size |= (*p & 0x7F) << shift;
-
-    return size + (p - (const byte*)this + 1);
-}
-
 Blob*
 Blob::Dup() const
 {
     return Dup(this);
 }
 
+Blob*
+Blob::Ref() const
+{
+    hbassert(m_RefCount < 127);
+    ++m_RefCount;
+    return const_cast<Blob*>(this);
+}
+
+void
+Blob::Unref()
+{
+    hbassert(m_RefCount > 0);
+    --m_RefCount;
+    if(0 == m_RefCount)
+    {
+        Destroy(this);
+    }
+}
+
+int
+Blob::NumRefs() const
+{
+    return m_RefCount;
+}
+
 int
 Blob::Compare(const byte* thatData, const size_t thatLen) const
 {
+    //DO NOT SUBMIT
+    //sm_StopWatch.Start();
+
     const byte* myData;
     const size_t myLen = GetData(&myData);
 
@@ -339,14 +391,23 @@ Blob::Compare(const byte* thatData, const size_t thatLen) const
     {
         return myLen > 0 ? memcmp(myData, thatData, myLen): 0;
     }
+
+    //DO NOT SUBMIT
+    //sm_StopWatch.Stop();
+}
+
+size_t
+Blob::GlobalBlobCount()
+{
+    return s_NumBlobs;
 }
 
 //protected:
 
 void
-Blob::Init(Blob* hbs, const byte* bytes, const size_t len)
+Blob::Init(Blob* blob, const byte* bytes, const size_t len)
 {
-    byte* p = (byte*) hbs;
+    byte* p = blob->bytes;
 
     size_t tmpLen = len;
     while(tmpLen > 0x7F)
@@ -426,7 +487,7 @@ BlobTest::Test()
 ///////////////////////////////////////////////////////////////////////////////
 StopWatch::StopWatch()
 : m_Start(0)
-, m_Stop(0)
+, m_Elapsed(0)
 , m_Running(false)
 {
 #if _MSC_VER
@@ -437,8 +498,29 @@ StopWatch::StopWatch()
 }
 
 void
+StopWatch::Clear()
+{
+    m_Start = m_Elapsed = 0;
+    m_Running = false;
+}
+
+void
+StopWatch::Start()
+{
+#if _MSC_VER
+    QueryPerformanceCounter((LARGE_INTEGER*)&m_Start);
+#elif defined(__GNUC__)
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    m_Start = (ts.tv_sec*m_Freq) + ts.tv_nsec;
+#endif
+    m_Running = true;
+}
+
+void
 StopWatch::Restart()
 {
+    m_Elapsed = 0;
 #if _MSC_VER
     QueryPerformanceCounter((LARGE_INTEGER*)&m_Start);
 #elif defined(__GNUC__)
@@ -452,14 +534,19 @@ StopWatch::Restart()
 void
 StopWatch::Stop()
 {
+    if(m_Running)
+    {
+        u64 stop;
 #if _MSC_VER
-    QueryPerformanceCounter((LARGE_INTEGER*)&m_Stop);
+        QueryPerformanceCounter((LARGE_INTEGER*)&stop);
 #elif defined(__GNUC__)
-    timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    m_Stop = (ts.tv_sec*m_Freq) + ts.tv_nsec;
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        stop = (ts.tv_sec*m_Freq) + ts.tv_nsec;
 #endif
-    m_Running = false;
+        m_Elapsed += stop - m_Start;
+        m_Running = false;
+    }
 }
 
 double
@@ -475,13 +562,12 @@ StopWatch::GetElapsed() const
         clock_gettime(CLOCK_REALTIME, &ts);
         stop = (ts.tv_sec*m_Freq) + ts.tv_nsec;
 #endif
+        return ((double)(m_Elapsed + stop - m_Start)) / m_Freq;
     }
     else
     {
-        stop = m_Stop;
+        return ((double)m_Elapsed) / m_Freq;
     }
-
-    return ((double)(stop - m_Start)) / m_Freq;
 }
 
 }   //namespace honeybase

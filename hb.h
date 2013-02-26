@@ -38,9 +38,11 @@ typedef u8          byte;
 #ifndef NDEBUG
 #define HB_ASSERT 1
 #define HB_ASSERTONLY(a) a
+#define HB_DEBUGONLY(a) a
 #else
 #define HB_ASSERT 0
 #define HB_ASSERTONLY(a)
+#define HB_DEBUGONLY(a)
 #endif
 
 #define hbverify(cond) ((cond) || (__debugbreak(),false))
@@ -83,6 +85,29 @@ enum ContainerType
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+//  StopWatch
+///////////////////////////////////////////////////////////////////////////////
+class StopWatch
+{
+public:
+    StopWatch();
+
+    void Clear();
+    void Start();
+    void Restart();
+    void Stop();
+
+    double GetElapsed() const;
+
+private:
+    u64 m_Freq;
+    u64 m_Start;
+    u64 m_Elapsed;
+
+    bool m_Running  : 1;
+};
+
+///////////////////////////////////////////////////////////////////////////////
 //  Blob
 ///////////////////////////////////////////////////////////////////////////////
 class Container
@@ -100,12 +125,11 @@ public:
     static Blob* Create(const size_t stringLen);
     static Blob* Create(const byte* string, const size_t stringLen);
     static Blob* Dup(const Blob* string);
-    static void Destroy(Blob* hbs);
-
-    static Blob* Encode(const byte* src, const size_t srcLen,
-                            byte* dst, const size_t dstSize);
-
+    static void Destroy(Blob* blob);
     static size_t Size(const size_t len);
+
+    /*static Blob* Encode(const byte* src, const size_t srcLen,
+                        byte* dst, const size_t dstSize);*/
 
     size_t GetData(const byte** data) const;
     size_t GetData(byte** data);
@@ -114,9 +138,11 @@ public:
 
     size_t Length() const;
 
-    size_t Size() const;
-
     Blob* Dup() const;
+
+    Blob* Ref() const;
+    void Unref();
+    int NumRefs() const;
 
     int Compare(const byte* thatData, const size_t thatLen) const;
 
@@ -127,30 +153,9 @@ public:
         return Compare(thatData, thatLen);
     }
 
-    bool EQ(const Blob* that) const
-    {
-        return Compare(that) == 0;
-    }
+    static size_t GlobalBlobCount();
 
-    bool LT(const Blob* that) const
-    {
-        return Compare(that) < 0;
-    }
-
-    bool GT(const Blob* that) const
-    {
-        return Compare(that) > 0;
-    }
-
-    bool LE(const Blob* that) const
-    {
-        return Compare(that) <= 0;
-    }
-
-    bool GE(const Blob* that) const
-    {
-        return Compare(that) >= 0;
-    }
+    static StopWatch sm_StopWatch;
 
 protected:
 
@@ -158,9 +163,12 @@ protected:
 
 private:
 
+    mutable s8 m_RefCount;
     byte bytes[1];
 
-    Blob(){};
+    Blob()
+    : m_RefCount(1)
+    {}
     ~Blob(){}
     Blob(const Blob&);
     Blob& operator=(const Blob&);
@@ -178,21 +186,6 @@ public:
         double m_Double;
         Blob* m_Blob;
     };
-
-    void Set(const s64 value)
-    {
-        m_Int = value;
-    }
-
-    void Set(const double value)
-    {
-        m_Double = value;
-    }
-
-    void Set(const Blob* value)
-    {
-        m_Blob = value->Dup();
-    }
 
     int Compare(const KeyType keyType, const Key& that) const
     {
@@ -234,6 +227,10 @@ public:
     {
         return Compare(keyType, that) >= 0;
     }
+
+private:
+
+    //Key& operator=(const Key&);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -249,6 +246,47 @@ public:
         Blob* m_Blob;
         Container* m_Container;
     };
+
+    int Compare(const ValueType valueType, const Value& that) const
+    {
+        switch(valueType)
+        {
+            case VALUETYPE_INT:
+            case VALUETYPE_DOUBLE:
+                return int(m_Int - that.m_Int);
+            break;
+            case VALUETYPE_BLOB:
+                return m_Blob->Compare(that.m_Blob);
+            break;
+        }
+
+        return -1;
+    }
+
+    bool EQ(const ValueType valueType, const Value& that) const
+    {
+        return Compare(valueType, that) == 0;
+    }
+
+    bool LT(const ValueType valueType, const Value& that) const
+    {
+        return Compare(valueType, that) < 0;
+    }
+
+    bool GT(const ValueType valueType, const Value& that) const
+    {
+        return Compare(valueType, that) > 0;
+    }
+
+    bool LE(const ValueType valueType, const Value& that) const
+    {
+        return Compare(valueType, that) <= 0;
+    }
+
+    bool GE(const ValueType valueType, const Value& that) const
+    {
+        return Compare(valueType, that) >= 0;
+    }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -278,6 +316,8 @@ public:
 
 	static void* ZAlloc(size_t size);
 
+	static void* Alloc(size_t size);
+
 	static void Free(void* mem);
 };
 
@@ -286,24 +326,6 @@ class BlobTest
 public:
 
     static void Test();
-};
-
-class StopWatch
-{
-public:
-    StopWatch();
-
-    void Restart();
-    void Stop();
-
-    double GetElapsed() const;
-
-private:
-    u64 m_Freq;
-    u64 m_Start;
-    u64 m_Stop;
-
-    bool m_Running  : 1;
 };
 
 }   //namespace honeybase

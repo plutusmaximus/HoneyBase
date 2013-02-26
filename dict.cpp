@@ -125,51 +125,26 @@ static size_t s_NumDictItems;
 //  HtItem
 ///////////////////////////////////////////////////////////////////////////////
 HtItem*
-HtItem::Create(const Key key, const KeyType keyType,
-                const Value value, const ValueType valueType)
+HtItem::Create(const Key& key, const KeyType keyType, const u32 hash)
 {
-    HtItem* item = Create();
+    HtItem* item = (HtItem*) Heap::ZAlloc(sizeof(HtItem));
+
     if(item)
     {
+        new(item) HtItem();
+        ++s_NumDictItems;
+
         item->m_KeyType = keyType;
-        item->m_ValType = valueType;
+        item->m_Hash = hash;
 
         switch(keyType)
         {
             case KEYTYPE_INT:
-                item->m_Key.m_Int = key.m_Int;
-                break;
             case KEYTYPE_DOUBLE:
-                item->m_Key.m_Double = key.m_Double;
+                item->m_Key = key;
                 break;
             case KEYTYPE_BLOB:
-                item->m_Key.m_Blob = key.m_Blob->Dup();
-                if(NULL == item->m_Key.m_Blob)
-                {
-                    Destroy(item);
-                    return NULL;
-                }
-                break;
-            default:
-                Destroy(item);
-                return NULL;
-        }
-
-        switch(valueType)
-        {
-            case VALUETYPE_INT:
-                item->m_Value.m_Int = value.m_Int;
-                break;
-            case VALUETYPE_DOUBLE:
-                item->m_Value.m_Double = value.m_Double;
-                break;
-            case VALUETYPE_BLOB:
-                item->m_Value.m_Blob = value.m_Blob->Dup();
-                if(NULL == item->m_Value.m_Blob)
-                {
-                    Destroy(item);
-                    return NULL;
-                }
+                item->m_Key.m_Blob = key.m_Blob->Ref();
                 break;
             default:
                 Destroy(item);
@@ -181,30 +156,57 @@ HtItem::Create(const Key key, const KeyType keyType,
 }
 
 HtItem*
-HtItem::CreateEmpty(const Key key, const KeyType keyType, const size_t len)
+HtItem::Create(const HashTable* ht, const Key& key, const KeyType keyType)
 {
-    HtItem* item = Create();
+    return Create(key, keyType, ht->HashKey(key, keyType));
+}
+
+HtItem*
+HtItem::Create(const Key& key, const KeyType keyType,
+                const Value& value, const ValueType valueType,
+                const u32 hash)
+{
+    HtItem* item = Create(key, keyType, hash);
     if(item)
     {
-        item->m_KeyType = keyType;
-        item->m_ValType = VALUETYPE_BLOB;
+        item->m_ValueType = valueType;
+        switch(valueType)
+        {
+            case VALUETYPE_INT:
+            case VALUETYPE_DOUBLE:
+                item->m_Value = value;
+                break;
+            case VALUETYPE_BLOB:
+                item->m_Value.m_Blob = value.m_Blob->Ref();
+                break;
+            default:
+                Destroy(item);
+                return NULL;
+        }
+    }
 
+    return item;
+}
+
+HtItem*
+HtItem::Create(const HashTable* ht,
+                const Key& key, const KeyType keyType,
+                const Value& value, const ValueType valueType)
+{
+    return Create(key, keyType, value, valueType, ht->HashKey(key, keyType));
+}
+
+HtItem*
+HtItem::CreateBlob(const HashTable* ht, const Key& key, const KeyType keyType, const size_t len)
+{
+    HtItem* item = Create(ht, key, keyType);
+    if(item)
+    {
+        item->m_ValueType = VALUETYPE_BLOB;
         if(NULL == (item->m_Value.m_Blob = Blob::Create(len)))
         {
             Destroy(item);
             item = NULL;
-        }
-        else if(KEYTYPE_BLOB == keyType)
-        {
-            if(NULL == (item->m_Key.m_Blob = key.m_Blob->Dup()))
-            {
-                Destroy(item);
-                item = NULL;
-            }
-        }
-        else
-        {
-            item->m_Key = key;
         }
     }
 
@@ -216,15 +218,15 @@ HtItem::Destroy(HtItem* item)
 {
     if(item)
     {
-        if(VALUETYPE_BLOB == item->m_KeyType)
+        if(KEYTYPE_BLOB == item->m_KeyType)
         {
-            Blob::Destroy(item->m_Key.m_Blob);
+            item->m_Key.m_Blob->Unref();
             item->m_Key.m_Blob = NULL;
         }
 
-        if(VALUETYPE_BLOB == item->m_ValType)
+        if(VALUETYPE_BLOB == item->m_ValueType)
         {
-            Blob::Destroy(item->m_Value.m_Blob);
+            item->m_Value.m_Blob->Unref();
             item->m_Value.m_Blob = NULL;
         }
 
@@ -236,24 +238,10 @@ HtItem::Destroy(HtItem* item)
 
 //private:
 
-HtItem*
-HtItem::Create()
-{
-    HtItem* item = (HtItem*) Heap::ZAlloc(sizeof(HtItem));
-
-    if(item)
-    {
-        new(item) HtItem();
-        ++s_NumDictItems;
-    }
-
-    return item;
-}
-
 HtItem::HtItem()
     : m_Next(0)
     , m_KeyType(KEYTYPE_INT)
-    , m_ValType(VALUETYPE_INT)
+    , m_ValueType(VALUETYPE_INT)
 {
 }
 
@@ -303,7 +291,8 @@ HashTable::Destroy(HashTable* dict)
 {
     if(dict)
     {
-        for(int i = 0; i < hbarraylen(dict->m_Slots); ++i)
+        size_t numSlots = dict->m_NumSlots;
+        for(int i = 0; i < hbarraylen(dict->m_Slots); ++i, numSlots /= 2)
         {
             Slot* slots = dict->m_Slots[i];
 
@@ -312,7 +301,7 @@ HashTable::Destroy(HashTable* dict)
                 continue;
             }
 
-            for(size_t j = 0; j < dict->m_NumSlots; ++j)
+            for(size_t j = 0; j < numSlots; ++j)
             {
                 HtItem* item = slots[j].m_Item;
                 while(item)
@@ -333,10 +322,10 @@ HashTable::Destroy(HashTable* dict)
 }
 
 bool
-HashTable::Set(const Key key, const KeyType keyType,
-                const Value value, const ValueType valueType)
+HashTable::Set(const Key& key, const KeyType keyType,
+                const Value& value, const ValueType valueType)
 {
-    HtItem* item = HtItem::Create(key, keyType, value, valueType);
+    HtItem* item = HtItem::Create(this, key, keyType, value, valueType);
     if(item)
     {
         Set(item);
@@ -347,7 +336,7 @@ HashTable::Set(const Key key, const KeyType keyType,
 }
 
 bool
-HashTable::Clear(const Key key, const KeyType keyType)
+HashTable::Clear(const Key& key, const KeyType keyType)
 {
     Slot* slot;
     u32 hash;
@@ -370,7 +359,7 @@ HashTable::Clear(const Key key, const KeyType keyType)
 }
 
 bool
-HashTable::Find(const Key key, const KeyType keyType,
+HashTable::Find(const Key& key, const KeyType keyType,
                 Value* value, ValueType* valueType)
 {
     Slot* slot;
@@ -380,7 +369,7 @@ HashTable::Find(const Key key, const KeyType keyType,
     if(*item)
     {
         *value = (*item)->m_Value;
-        *valueType = (*item)->m_ValType;
+        *valueType = (*item)->m_ValueType;
         return true;
     }
 
@@ -388,7 +377,7 @@ HashTable::Find(const Key key, const KeyType keyType,
 }
 
 bool
-HashTable::Patch(const Key key, const KeyType keyType,
+HashTable::Patch(const Key& key, const KeyType keyType,
                 const size_t numPatches,
                 const Blob** patches,
                 const size_t* offsets)
@@ -403,7 +392,7 @@ again:
 
     if(pOldItem)
     {
-        if(hbverify(VALUETYPE_BLOB == pOldItem->m_ValType))
+        if(hbverify(VALUETYPE_BLOB == pOldItem->m_ValueType))
         {
             byte* oldData;
             const byte* patchData;
@@ -462,7 +451,7 @@ again:
         const size_t patchLen = patches[patchNum]->GetData(&patchData);
         const size_t newLen = offsets[patchNum] + patchLen;
 
-        HtItem* newItem = pOldItem = HtItem::CreateEmpty(key, keyType, newLen);
+        HtItem* newItem = pOldItem = HtItem::CreateBlob(this, key, keyType, newLen);
 
         if(newItem)
         {
@@ -498,15 +487,83 @@ HashTable::HashBytes(const byte* bytes, const size_t len) const
     return MurmurHash2(bytes, len, m_HashSalt);
 }
 
+u32
+HashTable::HashKey(const Key& key, const KeyType keyType) const
+{
+    switch(keyType)
+    {
+    case KEYTYPE_INT:
+    case KEYTYPE_DOUBLE:
+        hb_static_assert(sizeof(key.m_Int) == sizeof(key.m_Double));
+        return HashBytes((const byte*)&key.m_Int, sizeof(key.m_Int));
+        break;
+    case KEYTYPE_BLOB:
+        {
+            const byte* keyData;
+            const size_t keylen = key.m_Blob->GetData(&keyData);
+            return HashBytes(keyData, keylen);
+        }
+        break;
+    }
+
+    hbassert(false);
+    return 0;
+}
+
+static const int MOVE_INCREMENT = 256;
+
 void
 HashTable::Set(HtItem* newItem)
+{
+    bool replaced;
+    this->Set(newItem, &replaced);
+}
+
+void
+HashTable::Set(HtItem* newItem, bool* replaced)
+{
+    Slot* slot;
+    HtItem** pitem = Find(newItem->m_Key, newItem->m_KeyType, newItem->m_Hash, &slot);
+
+    Set(newItem, pitem, slot, replaced);
+}
+
+void
+HashTable::Set(HtItem* newItem, HtItem** pitem, Slot* slot, bool* replaced)
+{
+    hbassert(pitem);
+
+    if(!*pitem)
+    {
+        ++slot->m_Count;
+        ++m_Count;
+        *replaced = false;
+    }
+    else
+    {
+        HtItem::Destroy(*pitem);
+        *replaced = true;
+    }
+
+    *pitem = newItem;
+
+    Rehash();
+}
+
+void
+HashTable::Rehash()
 {
     if(m_Count >= m_NumSlots*2)
     {
         Slot* newSlots = (Slot*) Heap::ZAlloc(m_NumSlots * 2 * sizeof(Slot));
         if(newSlots)
         {
-            Slot* oldSlots = m_Slots[0];
+            m_Slots[1] = m_Slots[0];
+            m_Slots[0] = newSlots;
+            m_NumSlots *= 2;
+            m_SlotToMove = 0;
+
+            /*Slot* oldSlots = m_Slots[0];
             m_Slots[0] = newSlots;
             const unsigned oldNumSlots = m_NumSlots;
             m_NumSlots *= 2;
@@ -527,73 +584,68 @@ HashTable::Set(HtItem* newItem)
                 }
             }
 
-            Heap::Free(oldSlots);
+            Heap::Free(oldSlots);*/
         }
     }
 
-    bool replaced;
-    this->Set(newItem, &replaced);
-
-    if(!replaced)
+    if(m_Slots[1])
     {
-        ++m_Count;
+        const size_t numOldSlots = m_NumSlots/2;
+        for(int i = 0; i < MOVE_INCREMENT && m_SlotToMove < numOldSlots; ++i, ++m_SlotToMove)
+        {
+            Slot* srcSlot = &m_Slots[1][m_SlotToMove];
+            HtItem** item = &srcSlot->m_Item;
+
+            while(*item)
+            {
+                HtItem* tmp = (*item);
+                *item = tmp->m_Next;
+
+                const unsigned idx = tmp->m_Hash & (m_NumSlots-1);
+                Slot* dstSlot = &m_Slots[0][idx];
+                tmp->m_Next = dstSlot->m_Item;
+                dstSlot->m_Item = tmp;
+                ++dstSlot->m_Count;
+            }
+
+            srcSlot->m_Count = 0;
+        }
+
+        if(m_SlotToMove >= numOldSlots)
+        {
+            Heap::Free(m_Slots[1]);
+            m_Slots[1] = NULL;
+            m_SlotToMove = 0;
+        }
     }
-}
-
-void
-HashTable::Set(HtItem* newItem, bool* replaced)
-{
-    Slot* slot;
-    u32 hash;
-    HtItem** pitem = Find(newItem->m_Key, newItem->m_KeyType, &slot, &hash);
-
-    hbassert(pitem);
-
-    if(!*pitem)
-    {
-        ++slot->m_Count;
-        *replaced = false;
-    }
-    else
-    {
-        HtItem::Destroy(*pitem);
-        *replaced = true;
-    }
-
-    *pitem = newItem;
-    (*pitem)->m_Hash = hash;
 }
 
 HtItem**
-HashTable::Find(const Key key, const KeyType keyType, Slot** slot, u32* hash)
+HashTable::Find(const Key& key, const KeyType keyType, Slot** slot, u32* hash)
 {
-    switch(keyType)
-    {
-    case KEYTYPE_INT:
-        *hash = HashBytes((const byte*)&key.m_Int, sizeof(key.m_Int));
-        break;
-    case KEYTYPE_DOUBLE:
-        *hash = HashBytes((const byte*)&key.m_Double, sizeof(key.m_Double));
-        break;
-    case KEYTYPE_BLOB:
-        {
-            const byte* keyData;
-            const size_t keylen = key.m_Blob->GetData(&keyData);
-            *hash = HashBytes(keyData, keylen);
-        }
-        break;
-    }
+    *hash = HashKey(key, keyType);
 
+    return Find(key, keyType, *hash, slot);
+}
+
+HtItem**
+HashTable::Find(const Key& key, const KeyType keyType, const u32 hash, Slot** slot)
+{
     HtItem** item = NULL;
-    for(int i = 0; i < 2 && m_Slots[i]; ++i)
+    size_t numSlots = m_NumSlots/2;
+    for(int i = 1; i >= 0; --i, numSlots *= 2)
     {
-        const unsigned idx = *hash & (m_NumSlots-1);
+        if(!m_Slots[i])
+        {
+            continue;
+        }
+        const unsigned idx = hash & (numSlots-1);
         *slot = &m_Slots[i][idx];
         item = &(*slot)->m_Item;
 
         for(; *item; item = &(*item)->m_Next)
         {
-            if(*hash == (*item)->m_Hash
+            if(hash == (*item)->m_Hash
                 && keyType == (*item)->m_KeyType
                  && (*item)->m_Key.EQ(keyType, key))
             {

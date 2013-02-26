@@ -6,14 +6,30 @@
 namespace honeybase
 {
 
+class SortedSet;
+
 class HtItem
 {
     friend class HashTable;
+    friend class SortedSet;
 private:
 
-    static HtItem* Create(const Key key, const KeyType keyType,
-                            const Value value, const ValueType valueType);
-    static HtItem* CreateEmpty(const Key key, const KeyType keyType, const size_t len);
+    static HtItem* Create(const Key& key,
+                            const KeyType keyType,
+                            const u32 hash);
+    static HtItem* Create(const HashTable* ht,
+                            const Key& key,
+                            const KeyType keyType);
+    static HtItem* Create(const Key& key, const KeyType keyType,
+                            const Value& value, const ValueType valueType,
+                            const u32 hash);
+    static HtItem* Create(const HashTable* ht,
+                            const Key& key, const KeyType keyType,
+                            const Value& value, const ValueType valueType);
+    static HtItem* CreateBlob(const HashTable* ht,
+                                const Key& key,
+                                const KeyType keyType,
+                                const size_t len);
     static void Destroy(HtItem* item);
 
     Key m_Key;
@@ -21,12 +37,10 @@ private:
     HtItem* m_Next;
     u32 m_Hash;
 
-    KeyType m_KeyType : 4;
-    ValueType m_ValType : 4;
+    KeyType m_KeyType       : 4;
+    ValueType m_ValueType   : 4;
 
 private:
-
-    static HtItem* Create();
 
     HtItem();
     ~HtItem();
@@ -36,20 +50,23 @@ private:
 
 class HashTable
 {
+    friend class SortedSet;
+    friend class HtItem;
+
 public:
 
     static HashTable* Create();
     static void Destroy(HashTable* dict);
 
-    bool Set(const Key key, const KeyType keyType,
-            const Value value, const ValueType valueType);
+    bool Set(const Key& key, const KeyType keyType,
+            const Value& value, const ValueType valueType);
 
-    bool Clear(const Key key, const KeyType keyType);
+    bool Clear(const Key& key, const KeyType keyType);
 
-    bool Find(const Key key, const KeyType keyType,
+    bool Find(const Key& key, const KeyType keyType,
                 Value* value, ValueType* valueType);
 
-    bool Patch(const Key key, const KeyType keyType,
+    bool Patch(const Key& key, const KeyType keyType,
                 const size_t numPatches,
                 const Blob** patches,
                 const size_t* offsets);
@@ -71,16 +88,24 @@ private:
 		int m_Count;
 	};
 
-	u32 HashBytes(const byte* bytes, const size_t len) const;
+	u32 HashBytes(const byte* bytes, const size_t len) const ;
+	u32 HashKey(const Key& key, const KeyType keyType) const;
 
     void Set(HtItem* item);
     void Set(HtItem* item, bool* replaced);
+    void Set(HtItem* item, HtItem**pitem, Slot* slot, bool* replaced);
+
+    void Rehash();
     
-    HtItem** Find(const Key key, const KeyType keyType, Slot** slot, u32* hash);
+    HtItem** Find(const Key& key, const KeyType keyType, Slot** slot, u32* hash);
+
+    HtItem** Find(const Key& key, const KeyType keyType, const u32 hash, Slot** slot);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
     Slot* m_Slots[2];
+
+    size_t m_SlotToMove;
 
     size_t m_Count;
     size_t m_NumSlots;

@@ -8,30 +8,6 @@ namespace honeybase
 
 class BTreeNode;
 
-class BTreeIterator
-{
-    friend class BTree;
-public:
-    BTreeIterator();
-    ~BTreeIterator();
-
-    void Clear();
-
-    bool HasNext() const;
-    bool HasCurrent() const;
-
-    bool Next();
-
-    Key GetKey();
-    Value GetValue();
-    ValueType GetValueType();
-
-private:
-
-    BTreeNode* m_Cur;
-    int m_ItemIndex;
-};
-
 class BTreeItem
 {
 public:
@@ -42,7 +18,7 @@ public:
         BTreeNode* m_Node;
     };
 
-    ValueType m_ValueType;
+    ValueType m_ValueType   : 4;
 };
 
 class BTreeNode
@@ -56,11 +32,8 @@ public:
     int m_NumKeys;
     const int m_MaxKeys;
 
-    //FRACNODES
-    Key* m_Keys;
-    BTreeItem m_Items[1];
-    //Key m_Keys[MAX_KEYS];
-    //BTreeItem m_Items[MAX_KEYS+1];
+    Key m_Keys[MAX_KEYS];
+    BTreeItem m_Items[MAX_KEYS+1];
 
     inline bool IsFull() const
     {
@@ -78,18 +51,22 @@ class BTree
 {
 public:
 
+    enum ItemFlags
+    {
+        ITEMFLAG_COPY_KEY   = 0x01,
+        ITEMFLAG_COPY_VALUE = 0x02,
+    };
+
     static BTree* Create(const KeyType keyType);
     static void Destroy(BTree* btree);
 
-    bool Insert(const Key key, const Value value, const ValueType valueType);
+    bool Insert(const Key& key, const Value& value, const ValueType valueType);//, const unsigned flags);
 
-    bool Delete(const Key key);
+    bool Delete(const Key& key);
 
     void DeleteAll();
 
-    bool Find(const Key key, Value* value, ValueType* valueType) const;
-
-    bool GetFirst(BTreeIterator* it);
+    bool Find(const Key& key, Value* value, ValueType* valueType) const;
 
     KeyType GetKeyType() const
     {
@@ -104,12 +81,12 @@ public:
 
 private:
 
-    bool Find(const Key key,
+    bool Find(const Key& key,
             const BTreeNode** outNode,
             int* outKeyIdx,
             const BTreeNode** outParent,
             int* outParentKeyIdx) const;
-    bool Find(const Key key,
+    bool Find(const Key& key,
             BTreeNode** outNode,
             int* outKeyIdx,
             BTreeNode** outParent,
@@ -125,18 +102,23 @@ private:
     BTreeNode* AllocNode(const int numKeys);
     void FreeNode(BTreeNode* node);
 
-    static int Bound(const KeyType keyType, const Key key, const Key* first, const Key* end);
-    static int LowerBound(const KeyType keyType, const Key key, const Key* first, const Key* end);
-    static int UpperBound(const KeyType keyType, const Key key, const Key* first, const Key* end);
+    static int Bound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
+    static int LowerBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
+    static int UpperBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
+
+    static int Bound(const KeyType keyType, const Key& key, const ValueType valueType, const Value& value,
+                        const Key* firstKey, const BTreeItem* firstItem, const size_t numKeys);
+    static int UpperBound(const KeyType keyType, const Key& key, const ValueType valueType, const Value& value,
+                        const Key* firstKey, const BTreeItem* firstItem, const size_t numKeys);
 
     BTreeNode* m_Nodes;
 
     BTreeNode* m_Leaves;
 
-    u64 m_Count;
-    u64 m_Capacity;
     int m_Depth;
     const KeyType m_KeyType;
+    u64 m_Count;
+    u64 m_Capacity;
 
     explicit BTree(const KeyType keyType);
     BTree();
