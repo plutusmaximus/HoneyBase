@@ -14,30 +14,24 @@ class HtItem
     friend class SortedSet;
 private:
 
-    static HtItem* Create(const Key& key,
-                            const KeyType keyType,
+    static HtItem* Create(const Value& key,
+                            const ValueType keyType,
                             const u32 hash);
-    static HtItem* Create(const HashTable* ht,
-                            const Key& key,
-                            const KeyType keyType);
-    static HtItem* Create(const Key& key, const KeyType keyType,
+    static HtItem* Create(const Value& key, const ValueType keyType,
                             const Value& value, const ValueType valueType,
                             const u32 hash);
-    static HtItem* Create(const HashTable* ht,
-                            const Key& key, const KeyType keyType,
-                            const Value& value, const ValueType valueType);
-    static HtItem* CreateBlob(const HashTable* ht,
-                                const Key& key,
-                                const KeyType keyType,
-                                const size_t len);
+    static HtItem* CreateBlob(const Value& key,
+                                const ValueType keyType,
+                                const size_t len,
+                                const u32 hash);
     static void Destroy(HtItem* item);
 
-    Key m_Key;
+    Value m_Key;
     Value m_Value;
     HtItem* m_Next;
     u32 m_Hash;
 
-    KeyType m_KeyType       : 4;
+    ValueType m_KeyType     : 4;
     ValueType m_ValueType   : 4;
 
 private:
@@ -56,22 +50,24 @@ class HashTable
 public:
 
     static HashTable* Create();
-    static void Destroy(HashTable* dict);
 
-    bool Set(const Key& key, const KeyType keyType,
+    bool Set(const Value& key, const ValueType keyType,
             const Value& value, const ValueType valueType);
 
-    bool Clear(const Key& key, const KeyType keyType);
+    bool Clear(const Value& key, const ValueType keyType);
 
-    bool Find(const Key& key, const KeyType keyType,
+    bool Find(const Value& key, const ValueType keyType,
                 Value* value, ValueType* valueType);
 
-    bool Patch(const Key& key, const KeyType keyType,
+    bool Patch(const Value& key, const ValueType keyType,
                 const size_t numPatches,
                 const Blob** patches,
                 const size_t* offsets);
 
     size_t Count() const;
+
+    void Ref() const;
+    void Unref();
 
 private:
 
@@ -88,8 +84,10 @@ private:
 		int m_Count;
 	};
 
+    static void Destroy(HashTable* dict);
+
 	u32 HashBytes(const byte* bytes, const size_t len) const ;
-	u32 HashKey(const Key& key, const KeyType keyType) const;
+	u32 HashKey(const Value& key, const ValueType keyType) const;
 
     void Set(HtItem* item);
     void Set(HtItem* item, bool* replaced);
@@ -97,9 +95,9 @@ private:
 
     void Rehash();
     
-    HtItem** Find(const Key& key, const KeyType keyType, Slot** slot, u32* hash);
+    HtItem** Find(const Value& key, const ValueType keyType, Slot** slot, u32* hash);
 
-    HtItem** Find(const Key& key, const KeyType keyType, const u32 hash, Slot** slot);
+    HtItem** Find(const Value& key, const ValueType keyType, const u32 hash, Slot** slot);
 
 	static const int INITIAL_NUM_SLOTS	= (1<<8);
 
@@ -109,6 +107,7 @@ private:
 
     size_t m_Count;
     size_t m_NumSlots;
+    mutable int m_RefCount;
 	u32 m_HashSalt;
 
     HashTable();

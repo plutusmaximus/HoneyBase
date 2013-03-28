@@ -219,29 +219,6 @@ Blob::Create(const byte* bytes, const size_t len)
     return blob;
 }
 
-Blob*
-Blob::Dup(const Blob* blob)
-{
-    Blob* newBlob = (Blob*) Heap::Alloc(Blob::Size(blob->Length()));
-    if(newBlob)
-    {
-        new(newBlob) Blob();
-        const byte* bytes;
-        const size_t len = blob->GetData(&bytes);
-        Init(newBlob, bytes, len);
-    }
-
-    return newBlob;
-}
-
-void
-Blob::Destroy(Blob* blob)
-{
-    blob->~Blob();
-    Heap::Free(blob);
-    --s_NumBlobs;
-}
-
 /*Blob*
 Blob::Encode(const byte* src, const size_t srcLen,
                 byte* dst, const size_t dstSize)
@@ -323,18 +300,18 @@ Blob::Length() const
     return len;
 }
 
-Blob*
+/*Blob*
 Blob::Dup() const
 {
     return Dup(this);
-}
+}*/
 
-Blob*
+void
 Blob::Ref() const
 {
+    hbassert(m_RefCount > 0);
     hbassert(m_RefCount < 127);
     ++m_RefCount;
-    return const_cast<Blob*>(this);
 }
 
 void
@@ -362,6 +339,11 @@ Blob::Compare(const byte* thatData, const size_t thatLen) const
 
     const byte* myData;
     const size_t myLen = GetData(&myData);
+
+    /*const size_t cmpLen = myLen < thatLen ? myLen : thatLen;
+    const int result = memcmp(myData, thatData, cmpLen);
+
+    return (0 == result) ? myLen - thatLen : result;*/
 
     if(myLen < thatLen)
     {
@@ -424,6 +406,33 @@ Blob::Init(Blob* blob, const byte* bytes, const size_t len)
     }
 }
 
+//private:
+
+/*Blob*
+Blob::Dup(const Blob* blob)
+{
+    Blob* newBlob = (Blob*) Heap::Alloc(Blob::Size(blob->Length()));
+    if(newBlob)
+    {
+        new(newBlob) Blob();
+        const byte* bytes;
+        const size_t len = blob->GetData(&bytes);
+        Init(newBlob, bytes, len);
+    }
+
+    return newBlob;
+}*/
+
+void
+Blob::Destroy(Blob* blob)
+{
+    hbassert(0 == blob->m_RefCount);
+
+    blob->~Blob();
+    Heap::Free(blob);
+    --s_NumBlobs;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  BlobTest
 ///////////////////////////////////////////////////////////////////////////////
@@ -435,7 +444,7 @@ BlobTest::Test()
     size_t len = hbs->GetData(&data);
     hbassert(len == 3);
     hbassert(0 == memcmp("Foo", data, strlen("Foo")));
-    Blob::Destroy(hbs);
+    hbs->Unref();
 
     byte* str;
 
@@ -450,7 +459,7 @@ BlobTest::Test()
     hbs->GetData(&data);
     hbassert(hbs->Length() == len);
     hbassert(0 == memcmp(str, data, len));
-    Blob::Destroy(hbs);
+    hbs->Unref();
     delete [] str;
 
     len = 0x7FFF + 321;
@@ -464,7 +473,7 @@ BlobTest::Test()
     hbassert(hbs->Length() == len);
     hbs->GetData(&data);
     hbassert(0 == memcmp(str, data, len));
-    Blob::Destroy(hbs);
+    hbs->Unref();
     delete [] str;
 
     len = 0x7FFFFF + 321;
@@ -478,7 +487,7 @@ BlobTest::Test()
     hbassert(hbs->Length() == len);
     hbs->GetData(&data);
     hbassert(0 == memcmp(str, data, len));
-    Blob::Destroy(hbs);
+    hbs->Unref();
     delete [] str;
 }
 

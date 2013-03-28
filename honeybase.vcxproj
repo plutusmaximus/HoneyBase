@@ -68,6 +68,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ExceptionHandling>false</ExceptionHandling>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -86,6 +87,7 @@
     <ClCompile Include="memfile.cpp" />
     <ClCompile Include="network.cpp" />
     <ClCompile Include="skiplist.cpp" />
+    <ClCompile Include="sortedset.cpp" />
     <ClCompile Include="tests.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -96,6 +98,7 @@
     <ClInclude Include="hb.h" />
     <ClInclude Include="network.h" />
     <ClInclude Include="skiplist.h" />
+    <ClInclude Include="sortedset.h" />
     <ClInclude Include="tests.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

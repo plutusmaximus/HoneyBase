@@ -13,23 +13,38 @@ class SkipItem
 {
     friend class SkipList;
 
-    Key m_Key;
+    bool LT(const ValueType keyType, const Value key) const
+    {
+        return m_KeyType < keyType
+                || (m_KeyType == keyType && m_Key.LT(keyType, key));
+    }
+
+    bool LE(const ValueType keyType, const Value key) const
+    {
+        return m_KeyType < keyType
+                || (m_KeyType == keyType && m_Key.LE(keyType, key));
+    }
+
+    Value m_Key;
     Value m_Value;
+    ValueType m_KeyType     : 4;
     ValueType m_ValueType   : 4;
 };
 
 class SkipNode
 {
 public:
-    static SkipNode* Create();
+    static SkipNode* Create(const int maxHeight);
     static void Destroy(SkipNode* node);
 
-    static const int BLOCK_LEN  = 96;
+    static const int BLOCK_LEN  = 192;
 
     SkipItem m_Items[BLOCK_LEN];
     int m_NumItems;
 
     int m_Height;
+
+    SkipNode* m_Prev;
 
     //*** This must be the last member in the class. ***
     SkipNode* m_Links[1];
@@ -47,36 +62,33 @@ class SkipList
 public:
     static const int MAX_HEIGHT = 32;
 
-    static SkipList* Create(const KeyType keyType);
+    static SkipList* Create(const ValueType keyType);
     static void Destroy(SkipList* skiplist);
 
-    bool Insert(const Key key, const Value value, const ValueType valueType);
+    bool Insert(const Value key, const ValueType keyType, const Value value, const ValueType valueType);
 
-    bool Delete(const Key key);
+    bool Delete(const Value key, const ValueType keyType);
 
-    bool Find(const Key key, Value* value, ValueType* valueType) const;
-
-    KeyType GetKeyType() const
-    {
-        return m_KeyType;
-    }
+    bool Find(const Value key, const ValueType keyType, Value* value, ValueType* valueType) const;
 
     u64 Count() const;
 
     double GetUtilization() const;
+
+    void Validate() const;
     
 private:
 
-    const KeyType m_KeyType;
     int m_Height;
+    int m_MaxHeight;
     SkipNode* m_Head[MAX_HEIGHT];
     u64 m_Count;
     u64 m_Capacity;
 
-    int LowerBound(const Key key, const SkipItem* first, const SkipItem* end) const;
-    int UpperBound(const Key key, const SkipItem* first, const SkipItem* end) const;
+    int LowerBound(const Value key, const ValueType keyType, const SkipItem* first, const size_t numItems) const;
+    int UpperBound(const Value key, const ValueType keyType, const SkipItem* first, const size_t numItems) const;
 
-    SkipList(const KeyType keyType);
+    SkipList(const ValueType keyType);
     ~SkipList();
     SkipList(const SkipList&);
     SkipList& operator=(const SkipList&);

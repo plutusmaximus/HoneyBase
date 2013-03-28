@@ -6,7 +6,9 @@
 namespace honeybase
 {
 
+class BTree;
 class BTreeNode;
+class SkipList;
 
 class BTreeItem
 {
@@ -16,9 +18,11 @@ public:
     {
         Value m_Value;
         BTreeNode* m_Node;
+        SkipList* m_SkipList;
     };
 
     ValueType m_ValueType   : 4;
+    bool m_IsDup            : 1;
 };
 
 class BTreeNode
@@ -32,7 +36,7 @@ public:
     int m_NumKeys;
     const int m_MaxKeys;
 
-    Key m_Keys[MAX_KEYS];
+    Value m_Keys[MAX_KEYS];
     BTreeItem m_Items[MAX_KEYS+1];
 
     inline bool IsFull() const
@@ -47,28 +51,58 @@ private:
     BTreeNode& operator=(const BTreeNode&);
 };
 
+class BTreeIterator
+{
+    friend class BTree;
+
+public:
+    BTreeIterator();
+    ~BTreeIterator();
+
+    void Clear();
+
+    bool GetValue(Value* value, ValueType* valueType) const;
+
+    void Advance();
+
+    bool operator==(const BTreeIterator& that) const;
+    bool operator!=(const BTreeIterator& that) const;
+
+private:
+
+    void Init(const BTree* btree,
+            const BTreeNode* node,
+            const int index);
+
+    const BTree* m_BTree;
+    const BTreeNode* m_Node;
+    int m_Index;
+
+    BTreeIterator(const BTreeIterator&);
+    BTreeIterator& operator=(const BTreeIterator&);
+};
+
 class BTree
 {
 public:
 
-    enum ItemFlags
-    {
-        ITEMFLAG_COPY_KEY   = 0x01,
-        ITEMFLAG_COPY_VALUE = 0x02,
-    };
-
-    static BTree* Create(const KeyType keyType);
+    static BTree* Create(const ValueType keyType);
     static void Destroy(BTree* btree);
 
-    bool Insert(const Key& key, const Value& value, const ValueType valueType);//, const unsigned flags);
+    bool Insert(const Value key, const Value value, const ValueType valueType);
 
-    bool Delete(const Key& key);
+    bool Delete(const Value key, const Value value, const ValueType valueType);
 
     void DeleteAll();
 
-    bool Find(const Key& key, Value* value, ValueType* valueType) const;
+    bool Find(const Value key, Value* value, ValueType* valueType) const;
 
-    KeyType GetKeyType() const
+    void Find(const Value startKey,
+                const Value endKey,
+                BTreeIterator* begin,
+                BTreeIterator* end) const;
+
+    ValueType GetKeyType() const
     {
         return m_KeyType;
     }
@@ -77,50 +111,54 @@ public:
 
     double GetUtilization() const;
 
-    void Validate();
+    void Validate() const;
 
 private:
 
-    bool Find(const Key& key,
+    bool Find(const Value key,
             const BTreeNode** outNode,
             int* outKeyIdx,
             const BTreeNode** outParent,
             int* outParentKeyIdx) const;
-    bool Find(const Key& key,
+    bool Find(const Value key,
             BTreeNode** outNode,
             int* outKeyIdx,
             BTreeNode** outParent,
             int* outParentKeyIdx);
+
+    void LowerBound(const Value key, BTreeNode** outNode, int* outKeyIdx) const;
+    void UpperBound(const Value key, BTreeNode** outNode, int* outKeyIdx) const;
 
     void MergeLeft(BTreeNode* parent, const int keyIdx, const int count, const int depth);
     void MergeRight(BTreeNode* parent, const int keyIdx, const int count, const int depth);
 
     void TrimNode(BTreeNode* node, const int depth);
 
-    void ValidateNode(const int depth, BTreeNode* node);
+    void ValidateNode(const int depth, BTreeNode* node) const;
 
-    BTreeNode* AllocNode(const int numKeys);
+    BTreeNode* AllocNode();
     void FreeNode(BTreeNode* node);
 
-    static int Bound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
-    static int LowerBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
-    static int UpperBound(const KeyType keyType, const Key& key, const Key* first, const size_t numKeys);
+    //int Bound(const Value key, const Value* first, const size_t numKeys) const;
+    int LowerBound(const Value key, const Value* first, const size_t numKeys) const;
+    int UpperBound(const Value key, const Value* first, const size_t numKeys) const;
 
-    static int Bound(const KeyType keyType, const Key& key, const ValueType valueType, const Value& value,
-                        const Key* firstKey, const BTreeItem* firstItem, const size_t numKeys);
-    static int UpperBound(const KeyType keyType, const Key& key, const ValueType valueType, const Value& value,
-                        const Key* firstKey, const BTreeItem* firstItem, const size_t numKeys);
+    int Bound(const Value key, const ValueType valueType, const Value value,
+            const Value* firstKey, const BTreeItem* firstItem, const size_t numKeys) const;
+    int UpperBound(const Value key, const ValueType valueType, const Value value,
+                    const Value* firstKey, const BTreeItem* firstItem, const size_t numKeys) const;
+
 
     BTreeNode* m_Nodes;
 
     BTreeNode* m_Leaves;
 
     int m_Depth;
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     u64 m_Count;
     u64 m_Capacity;
 
-    explicit BTree(const KeyType keyType);
+    explicit BTree(const ValueType keyType);
     BTree();
     ~BTree();
     BTree(const BTree&);

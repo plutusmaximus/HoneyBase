@@ -26,11 +26,11 @@ int main(int /*argc*/, char** /*argv*/)
 
     const int NUMKEYS = 1000*1000;
 
-    const KeyType keyType = KEYTYPE_BLOB;
+    const ValueType keyType = VALUETYPE_BLOB;
     const ValueType valueType = VALUETYPE_BLOB;
     const TestKeyOrder keyOrder = KEYORDER_RANDOM;
 
-    s_Log.Debug("SPEED DICT");
+    /*s_Log.Debug("SPEED DICT");
     sw.Restart();
     {
         HashTableSpeedTest test(keyType, valueType);
@@ -38,9 +38,9 @@ int main(int /*argc*/, char** /*argv*/)
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
-    hbassert(0 == Blob::GlobalBlobCount());
+    hbassert(0 == Blob::GlobalBlobCount());*/
 
-    s_Log.Debug("SPEED BTREEE");
+    /*s_Log.Debug("SPEED BTREEE");
     sw.Restart();
     {
         BTreeSpeedTest test(keyType, valueType);
@@ -48,19 +48,20 @@ int main(int /*argc*/, char** /*argv*/)
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
-    hbassert(0 == Blob::GlobalBlobCount());
+    hbassert(0 == Blob::GlobalBlobCount());*/
 
-    /*s_Log.Debug("SPEED SKIPLIST");
+    s_Log.Debug("SPEED SKIPLIST");
     sw.Restart();
     {
-        SkipListSpeedTest test(keyType, valueType);
+        //SkipListSpeedTest test(keyType, valueType);
+        SkipListSpeedTest test(valueType);
         test.AddKeys(NUMKEYS, keyOrder, true, 0);
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
-    hbassert(0 == Blob::GlobalBlobCount());*/
+    hbassert(0 == Blob::GlobalBlobCount());
 
-    s_Log.Debug("SPEED SORTEDSET");
+    /*s_Log.Debug("SPEED SORTEDSET");
     sw.Restart();
     {
         SortedSetSpeedTest test(keyType, valueType);
@@ -68,7 +69,7 @@ int main(int /*argc*/, char** /*argv*/)
     }
     sw.Stop();
     s_Log.Debug("total: %f", sw.GetElapsed());
-    hbassert(0 == Blob::GlobalBlobCount());
+    hbassert(0 == Blob::GlobalBlobCount());*/
 
     /*s_Log.Debug("DICT");
     sw.Restart();
@@ -93,7 +94,8 @@ int main(int /*argc*/, char** /*argv*/)
     /*s_Log.Debug("SKIPLIST");
     sw.Restart();
     {
-        SkipListTest test(keyType, valueType);
+        //SkipListTest test(keyType, valueType);
+        SkipListTest test(valueType);
         test.AddKeys(NUMKEYS, keyOrder, true, 0);
     }
     sw.Stop();
@@ -121,7 +123,7 @@ void TestCommands()
 {
     const char cmdStr1[] = {"*3\r\n$3\r\nset\r\n$3\r\nfoo\r\n$3\r\nbar\r\n*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n"};
 
-    HashTable* dict = HashTable::Create();
+    HashTable* ht = HashTable::Create();
 
     Command cmd;
     Error err;
@@ -131,12 +133,12 @@ void TestCommands()
         i += cmd.Parse((u8*)&cmdStr1[i], 1, &err);
         if(cmd.IsComplete())
         {
-            cmd.Exec(dict, &err);
+            cmd.Exec(ht, &err);
             cmd.Reset();
         }
     }
 
-    HashTable::Destroy(dict);
+    ht->Unref();
 }
 
 /*void PrintCmd(const Command* cmd)

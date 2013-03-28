@@ -12,18 +12,18 @@ class SortedSet
 
 public:
 
-    static SortedSet* Create(const KeyType scoreType);
+    static SortedSet* Create(const ValueType scoreType);
     static void Destroy(SortedSet* set);
 
-    bool Set(const Key& key, const KeyType keyType, const Key& score);//, const unsigned flags);
+    bool Set(const Value& key, const ValueType keyType, const Value& score);//, const unsigned flags);
 
-    bool Clear(const Key& key, const KeyType keyType);
+    bool Clear(const Value& key, const ValueType keyType);
 
     void ClearAll();
 
-    bool Find(const Key& score, Key* key, KeyType* keyType) const;
+    bool Find(const Value& score, Value* key, ValueType* keyType) const;
 
-    KeyType GetKeyType() const
+    ValueType GetKeyType() const
     {
         return m_Bt->GetKeyType();
     }

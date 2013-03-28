@@ -13,39 +13,45 @@ enum TestKeyOrder
 class KV
 {
 public:
-    static KV* CreateKeys(const KeyType keyType,
+    static KV* CreateKeys(const ValueType keyType,
                             const size_t keySize,
                             const ValueType valueType,
                             const size_t valueSize,
                             const TestKeyOrder keyOrder,
                             const int numKeys);
 
-    static void DestroyKeys(const KeyType keyType,
-                            const ValueType valueType,
-                            KV* kv,
+    static KV* CreateRandomKeys(const size_t keySize,
+                                const ValueType valueType,
+                                const size_t valueSize,
+                                const TestKeyOrder keyOrder,
+                                const int numKeys);
+
+    static void DestroyKeys(KV* kv,
                             const int numKeys);
 
-    Key m_Key;
+    Value m_Key;
     Value m_Value;
-    KeyType m_KeyType;
+    ValueType m_KeyType;
     ValueType m_ValueType;
 
     bool m_Added : 1;
 
     bool operator<(const KV& a) const
     {
-        return m_Key.LT(m_KeyType, a.m_Key);
+        return m_KeyType < a.m_KeyType
+                || (m_KeyType == a.m_KeyType && m_Key.LT(m_KeyType, a.m_Key));
     }
 
     bool operator>(const KV& a) const
     {
-        return m_Key.GT(m_KeyType, a.m_Key);
+        return m_KeyType > a.m_KeyType
+                || (m_KeyType == a.m_KeyType && m_Key.GT(m_KeyType, a.m_Key));
     }
 
 private:
 
     KV()
-    : m_KeyType(KEYTYPE_INT)
+    : m_KeyType(VALUETYPE_INT)
     , m_ValueType(VALUETYPE_INT)
     , m_Added(false)
     {
@@ -58,7 +64,7 @@ class HashTableTest
 {
 public:
 
-    HashTableTest(const KeyType keyType, const ValueType valueType);
+    HashTableTest(const ValueType keyType, const ValueType valueType);
 
     void Test(const int numKeys);
 
@@ -70,7 +76,7 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 
@@ -78,7 +84,7 @@ class HashTableSpeedTest
 {
 public:
 
-    HashTableSpeedTest(const KeyType keyType, const ValueType valueType);
+    HashTableSpeedTest(const ValueType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder);
 
@@ -86,7 +92,7 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 
@@ -94,7 +100,7 @@ class BTreeTest
 {
 public:
 
-    BTreeTest(const KeyType keyType, const ValueType valueType);
+    BTreeTest(const ValueType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
     void AddDeleteKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
@@ -102,7 +108,7 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 
@@ -110,13 +116,13 @@ class BTreeSpeedTest
 {
 public:
 
-    BTreeSpeedTest(const KeyType keyType, const ValueType valueType);
+    BTreeSpeedTest(const ValueType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 
@@ -124,7 +130,9 @@ class SkipListTest
 {
 public:
 
-    SkipListTest(const KeyType keyType, const ValueType valueType);
+    SkipListTest(const ValueType keyType, const ValueType valueType);
+
+    SkipListTest(const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
@@ -132,29 +140,33 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
+    bool m_RandomKeyTypes   : 1;
 };
 
 class SkipListSpeedTest
 {
 public:
 
-    SkipListSpeedTest(const KeyType keyType, const ValueType valueType);
+    SkipListSpeedTest(const ValueType keyType, const ValueType valueType);
+
+    SkipListSpeedTest(const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
+    bool m_RandomKeyTypes   : 1;
 };
 
 class SortedSetTest
 {
 public:
 
-    SortedSetTest(const KeyType keyType, const ValueType valueType);
+    SortedSetTest(const ValueType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
@@ -162,7 +174,7 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 
@@ -170,7 +182,7 @@ class SortedSetSpeedTest
 {
 public:
 
-    SortedSetSpeedTest(const KeyType keyType, const ValueType valueType);
+    SortedSetSpeedTest(const ValueType keyType, const ValueType valueType);
 
     void AddKeys(const int numKeys, const TestKeyOrder keyOrder, const bool unique, const int range);
 
@@ -178,7 +190,7 @@ public:
 
 private:
 
-    const KeyType m_KeyType;
+    const ValueType m_KeyType;
     const ValueType m_ValueType;
 };
 

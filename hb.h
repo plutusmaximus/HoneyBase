@@ -4,6 +4,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 #define __STDC_FORMAT_MACROS
 
@@ -62,26 +63,11 @@ unsigned Rand(const unsigned min, const unsigned max);
 
 size_t Base64Encode(const byte* bytes, const size_t numBytes, char* buf, const size_t bufSize);
 
-enum KeyType
-{
-    KEYTYPE_INT,
-    KEYTYPE_DOUBLE,
-    KEYTYPE_BLOB
-};
-
 enum ValueType
 {
     VALUETYPE_INT,
     VALUETYPE_DOUBLE,
-    VALUETYPE_BLOB,
-    VALUETYPE_CONTAINER
-};
-
-enum ContainerType
-{
-    CONTAINERTYPE_HASHTABLE,
-    CONTAINERTYPE_BTREE,
-    CONTAINERTYPE_SKIPLIST,
+    VALUETYPE_BLOB
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -110,22 +96,12 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 //  Blob
 ///////////////////////////////////////////////////////////////////////////////
-class Container
-{
-    ContainerType m_ContainerType;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-//  Blob
-///////////////////////////////////////////////////////////////////////////////
 class Blob
 {
 public:
 
     static Blob* Create(const size_t stringLen);
     static Blob* Create(const byte* string, const size_t stringLen);
-    static Blob* Dup(const Blob* string);
-    static void Destroy(Blob* blob);
     static size_t Size(const size_t len);
 
     /*static Blob* Encode(const byte* src, const size_t srcLen,
@@ -138,9 +114,9 @@ public:
 
     size_t Length() const;
 
-    Blob* Dup() const;
+    //Blob* Dup() const;
 
-    Blob* Ref() const;
+    void Ref() const;
     void Unref();
     int NumRefs() const;
 
@@ -163,6 +139,9 @@ protected:
 
 private:
 
+    //static Blob* Dup(const Blob* string);
+    static void Destroy(Blob* blob);
+
     mutable s8 m_RefCount;
     byte bytes[1];
 
@@ -172,65 +151,6 @@ private:
     ~Blob(){}
     Blob(const Blob&);
     Blob& operator=(const Blob&);
-};
-
-///////////////////////////////////////////////////////////////////////////////
-//  Key
-///////////////////////////////////////////////////////////////////////////////
-class Key
-{
-public:
-    union
-    {
-        s64 m_Int;
-        double m_Double;
-        Blob* m_Blob;
-    };
-
-    int Compare(const KeyType keyType, const Key& that) const
-    {
-        switch(keyType)
-        {
-            case KEYTYPE_INT:
-            case KEYTYPE_DOUBLE:
-                return int(m_Int - that.m_Int);
-            break;
-            case KEYTYPE_BLOB:
-                return m_Blob->Compare(that.m_Blob);
-            break;
-        }
-
-        return -1;
-    }
-
-    bool EQ(const KeyType keyType, const Key& that) const
-    {
-        return Compare(keyType, that) == 0;
-    }
-
-    bool LT(const KeyType keyType, const Key& that) const
-    {
-        return Compare(keyType, that) < 0;
-    }
-
-    bool GT(const KeyType keyType, const Key& that) const
-    {
-        return Compare(keyType, that) > 0;
-    }
-
-    bool LE(const KeyType keyType, const Key& that) const
-    {
-        return Compare(keyType, that) <= 0;
-    }
-
-    bool GE(const KeyType keyType, const Key& that) const
-    {
-        return Compare(keyType, that) >= 0;
-    }
-
-private:
-
-    //Key& operator=(const Key&);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -244,20 +164,23 @@ public:
         s64 m_Int;
         double m_Double;
         Blob* m_Blob;
-        Container* m_Container;
     };
 
     int Compare(const ValueType valueType, const Value& that) const
     {
+        hb_static_assert(sizeof(m_Int) == sizeof(m_Double));
+
         switch(valueType)
         {
             case VALUETYPE_INT:
-            case VALUETYPE_DOUBLE:
                 return int(m_Int - that.m_Int);
-            break;
+                break;
+            case VALUETYPE_DOUBLE:
+                return (m_Double < that.m_Double) ? -1 : (m_Double == that.m_Double) ? 0 : 1;
+                break;
             case VALUETYPE_BLOB:
                 return m_Blob->Compare(that.m_Blob);
-            break;
+                break;
         }
 
         return -1;

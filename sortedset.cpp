@@ -6,7 +6,7 @@ namespace honeybase
 {
 
 SortedSet*
-SortedSet::Create(const KeyType keyType)
+SortedSet::Create(const ValueType keyType)
 {
     SortedSet* set = (SortedSet*) Heap::ZAlloc(sizeof(SortedSet));
     if(set)
@@ -39,7 +39,7 @@ SortedSet::Destroy(SortedSet* set)
 }
 
 bool
-SortedSet::Set(const Key& key, const KeyType keyType, const Key& score)
+SortedSet::Set(const Value& key, const ValueType keyType, const Value& score)
 {
     HashTable::Slot* slot;
     u32 hash;
@@ -51,22 +51,21 @@ SortedSet::Set(const Key& key, const KeyType keyType, const Key& score)
     {
         HtItem* item = *pitem;
 
-        hb_static_assert(sizeof(Key) == sizeof(Value));
+        hbassert(m_Bt->GetKeyType() == item->m_ValueType);
 
-        hbassert(m_Bt->GetKeyType() == (KeyType)item->m_ValueType);
+        hbverify(m_Bt->Delete(item->m_Value, key, keyType));
 
-        hbverify(m_Bt->Delete((const Key&)item->m_Value));
-
-        if(hbverify(m_Bt->Insert(score, (const Value&)key, (ValueType) keyType)))
+        if(hbverify(m_Bt->Insert(score, key, (ValueType) keyType)))
         {
-            if(KEYTYPE_BLOB == m_Bt->GetKeyType())
+            if(VALUETYPE_BLOB == m_Bt->GetKeyType())
             {
                 item->m_Value.m_Blob->Unref();
-                item->m_Value.m_Blob = ((const Value&)score).m_Blob->Ref();
+                item->m_Value.m_Blob = score.m_Blob;
+                item->m_Value.m_Blob->Ref();
             }
             else
             {
-                item->m_Value = (const Value&)score;
+                item->m_Value = score;
             }
 
             return true;
@@ -74,17 +73,15 @@ SortedSet::Set(const Key& key, const KeyType keyType, const Key& score)
     }
     else
     {
-        hb_static_assert(sizeof(Key) == sizeof(Value));
-
         HtItem* item = HtItem::Create(key,
                                         keyType,
-                                        (const Value&)score,
+                                        score,
                                         (ValueType)m_Bt->GetKeyType(),
                                         hash);
 
         if(hbverify(item))
         {
-            if(hbverify(m_Bt->Insert(score, (const Value&)key, (ValueType) keyType)))
+            if(hbverify(m_Bt->Insert(score, key, (ValueType) keyType)))
             {
                 bool replaced;
                 m_Ht->Set(item, pitem, slot, &replaced);
@@ -101,15 +98,13 @@ SortedSet::Set(const Key& key, const KeyType keyType, const Key& score)
 }
 
 bool
-SortedSet::Clear(const Key& key, const KeyType keyType)
+SortedSet::Clear(const Value& key, const ValueType keyType)
 {
     Value value;
     ValueType valueTyoe;
     if(m_Ht->Find(key, keyType, &value, &valueTyoe))
     {
-        hb_static_assert(sizeof(Key) == sizeof(Value));
-
-        return m_Bt->Delete((const Key&)value);
+        return m_Bt->Delete(value, key, keyType);
     }
 
     return false;
@@ -121,9 +116,8 @@ SortedSet::ClearAll()
 }
 
 bool
-SortedSet::Find(const Key& score, Key* key, KeyType* keyType) const
+SortedSet::Find(const Value& score, Value* key, ValueType* keyType) const
 {
-    hb_static_assert(sizeof(Key) == sizeof(Value));
     return m_Bt->Find(score, (Value*)key, (ValueType*)keyType);
 }
 
@@ -156,7 +150,7 @@ SortedSet::~SortedSet()
 
     if(m_Ht)
     {
-        HashTable::Destroy(m_Ht);
+        m_Ht->Unref();
     }
 }
 

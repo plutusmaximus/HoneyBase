@@ -36,7 +36,7 @@ Command::Reset()
     {
         for(int i = 0; i < m_CurArg; ++i)
         {
-            Blob::Destroy(m_ArgV[i]);
+            m_ArgV[i]->Unref();
         }
 
         delete [] m_ArgV;
@@ -48,7 +48,7 @@ Command::Reset()
         {
             if(VALUETYPE_BLOB == m_ResultT[i])
             {
-                Blob::Destroy(m_ResultV[i].m_Blob);
+                m_ResultV[i].m_Blob->Unref();
             }
         }
 
@@ -140,7 +140,16 @@ Command::Parse(const u8* cmdStr, const size_t len, Error* err)
             for(; p < end; ++p)
             {
                 const int n = *p - '0';
-                if(n < 0 || n > 9)
+                if(n >= 0 && n <= 9)
+                {
+                    m_ArgC = (m_ArgC * 10) + n;
+                }
+                else if(0 == m_ArgC)
+                {
+                    err->SetFailed(ERROR_UNEXPECTED_TOKEN, "Zero argument count");
+                    return 0;
+                }
+                else if('\r' == *p)
                 {
                     m_State = STATE_LF;
                     m_NextState = STATE_DOLLAR;
@@ -151,7 +160,8 @@ Command::Parse(const u8* cmdStr, const size_t len, Error* err)
                 }
                 else
                 {
-                    m_ArgC = (m_ArgC * 10) + n;
+                    err->SetFailed(ERROR_UNEXPECTED_TOKEN, "Expected CR");
+                    return 0;
                 }
             }
             break;
@@ -161,12 +171,6 @@ Command::Parse(const u8* cmdStr, const size_t len, Error* err)
             {
                 m_ArgLen = 0;
                 m_State = STATE_ARG_LEN;
-                ++p;
-            }
-            else if('\r' == *p)
-            {
-                m_State = STATE_LF;
-                m_NextState = STATE_ARG_LEN;
                 ++p;
             }
             else
@@ -180,7 +184,16 @@ Command::Parse(const u8* cmdStr, const size_t len, Error* err)
             for(; p < end; ++p)
             {
                 const int n = *p - '0';
-                if(n < 0 || n > 9)
+                if(n >= 0 && n <= 9)
+                {
+                    m_ArgLen = (m_ArgLen * 10) + n;
+                }
+                else if(0 == m_ArgLen)
+                {
+                    err->SetFailed(ERROR_UNEXPECTED_TOKEN, "Zero argument length");
+                    return 0;
+                }
+                else if('\r' == *p)
                 {
                     m_State = STATE_LF;
                     m_NextState = STATE_ARG;
@@ -192,7 +205,8 @@ Command::Parse(const u8* cmdStr, const size_t len, Error* err)
                 }
                 else
                 {
-                    m_ArgLen = (m_ArgLen * 10) + n;
+                    err->SetFailed(ERROR_UNEXPECTED_TOKEN, "Expected CR");
+                    return 0;
                 }
             }
             break;
@@ -251,10 +265,10 @@ Command::Exec(HashTable* dict, Error* err)
         {
             if(3 == m_ArgC)
             {
-                Key key; Value value;
+                Value key; Value value;
                 key.m_Blob = m_ArgV[1];
                 value.m_Blob = m_ArgV[2];
-                dict->Set(key, KEYTYPE_BLOB, value, VALUETYPE_BLOB);
+                dict->Set(key, VALUETYPE_BLOB, value, VALUETYPE_BLOB);
                 m_ResultV = &m_SingleResultValue;
                 m_ResultT = &m_SingleResultType;
                 m_ResultC = 1;
@@ -268,9 +282,9 @@ Command::Exec(HashTable* dict, Error* err)
         {
             if(m_ArgC == 2)
             {
-                Key key;
+                Value key;
                 key.m_Blob = m_ArgV[1];
-                if(dict->Find(key, KEYTYPE_BLOB, &m_SingleResultValue, &m_SingleResultType))
+                if(dict->Find(key, VALUETYPE_BLOB, &m_SingleResultValue, &m_SingleResultType))
                 {
                     m_ResultV = &m_SingleResultValue;
                     m_ResultT = &m_SingleResultType;

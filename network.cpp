@@ -21,6 +21,7 @@ namespace honeybase
 
 static HANDLE s_hIOCP = NULL;
 static SOCKET s_Listener = INVALID_SOCKET;
+static LPFN_ACCEPTEX lpfnAcceptEx = NULL;
 
 class Client
 {
@@ -33,6 +34,53 @@ public:
     {
     }
 
+    bool Open()
+    {
+        if(!hbverify(INVALID_SOCKET == m_Skt))
+        {
+            return false;
+        }
+
+        m_Skt = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(INVALID_SOCKET == m_Skt)
+        {
+            return false;
+        }
+
+        DWORD bytesRecvd;
+        memset(&m_Overlapped, 0, sizeof(m_Overlapped));
+
+        if(!lpfnAcceptEx(s_Listener,
+                        m_Skt,
+                        m_LocalAndRemoteAddr,
+                        0,
+                        sizeof(sockaddr_in) + 16,
+                        sizeof(sockaddr_in) + 16,
+                        &bytesRecvd,
+                        &m_Overlapped))
+        {
+            const int err = WSAGetLastError();
+            if(ERROR_IO_PENDING != err)
+            {
+                return false;
+            }
+        }
+
+        if(NULL == CreateIoCompletionPort((HANDLE)m_Skt,
+                                            s_hIOCP,
+                                            (ULONG_PTR)0,
+                                            0))
+        {
+            const DWORD dwErr = GetLastError();
+            if(ERROR_IO_PENDING != dwErr)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void Close()
     {
         m_Cmd.Reset();
@@ -43,6 +91,13 @@ public:
         }
 
         m_State = STATE_ACCEPT;
+        m_BufLen = 0;
+    }
+
+    bool Reopen()
+    {
+        Close();
+        return Open();
     }
 
     enum State
@@ -109,7 +164,6 @@ Network::Startup(const unsigned listenPort)
             }
         }
 
-        LPFN_ACCEPTEX lpfnAcceptEx = NULL;
         GUID GuidAcceptEx = WSAID_ACCEPTEX;
         DWORD dwBytes;
         
@@ -127,44 +181,10 @@ Network::Startup(const unsigned listenPort)
 
         for(int i = 0; i < MAX_CLIENTS; ++i)
         {
-            s_Clients[i].m_Skt = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if(INVALID_SOCKET == s_Clients[i].m_Skt)
+            if(!s_Clients[i].Open())
             {
                 Shutdown();
                 return false;
-            }
-
-            DWORD bytesRecvd;
-            memset(&s_Clients[i].m_Overlapped, 0, sizeof(s_Clients[i].m_Overlapped));
-
-            if(!lpfnAcceptEx(s_Listener,
-                            s_Clients[i].m_Skt,
-                            s_Clients[i].m_LocalAndRemoteAddr,
-                            0,
-                            sizeof(sockaddr_in) + 16,
-                            sizeof(sockaddr_in) + 16,
-                            &bytesRecvd,
-                            &s_Clients[i].m_Overlapped))
-            {
-                err = WSAGetLastError();
-                if(ERROR_IO_PENDING != err)
-                {
-                    Shutdown();
-                    return false;
-                }
-            }
-
-            if(NULL == CreateIoCompletionPort((HANDLE)s_Clients[i].m_Skt,
-                                               s_hIOCP,
-                                               (ULONG_PTR)0,
-                                               0))
-            {
-                DWORD dwErr = GetLastError();
-                if(ERROR_IO_PENDING != dwErr)
-                {
-                    Shutdown();
-                    return false;
-                }
             }
         }
 
@@ -199,14 +219,14 @@ Network::Startup(const unsigned listenPort)
                 }
                 else
                 {
-                    client->Close();
+                    client->Reopen();
                     continue;
                 }
                 break;
             case Client::STATE_RECV:
                 if(!completed || (completed && 0 == bytesTransferred))
                 {
-                    client->Close();
+                    client->Reopen();
                     continue;
                 }
 
@@ -228,7 +248,7 @@ Network::Startup(const unsigned listenPort)
 
                     WSASend(client->m_Skt, wsaBufs, bufCount, &numBytesSent, 0, NULL, NULL);
 
-                    client->Close();
+                    client->Reopen();
                     continue;
                 }
                 else if(client->m_Cmd.IsComplete())
